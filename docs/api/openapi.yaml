@@ -1,0 +1,1474 @@
+openapi: 3.0.3
+info:
+  title: Hospitus API
+  description: |
+    Hospitus is an API-first virtualization management platform for FreeBSD.
+    It manages jails, bhyve VMs, QEMU VMs, and Podman containers through
+    a unified REST API.
+
+    ## Authentication
+
+    API requests are authenticated with an API key sent in the `X-API-Key`
+    header:
+
+        X-API-Key: <key>
+
+    Exceptions: `/health` is always public; `/metrics` and
+    `/metrics/prometheus` are public only when the daemon is started with
+    `--metrics-public`.
+
+    Configure keys by passing `--api-key <key>` (repeatable) or
+    `--api-key-file <path>` (one key per line) to `hospitusd`. Keys are
+    bcrypt-hashed in memory at load time; there is no separate hashing step.
+
+    ## Async Operations
+
+    Long-running operations (create, image fetch) return `202 Accepted` with a
+    job object. Poll `GET /api/v1/jobs/{id}` for status. Job IDs are UUIDs.
+  version: "1.0.0"
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local hospitusd (default, no TLS)
+  - url: https://{host}:8443
+    description: Remote hospitusd (TLS)
+    variables:
+      host:
+        default: 127.0.0.1
+
+security:
+  - ApiKeyHeader: []
+
+components:
+  securitySchemes:
+    ApiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    ProviderType:
+      type: string
+      enum: [jail, bhyve, qemu, podman]
+
+    InstanceState:
+      type: string
+      enum: [running, stopped, creating, deleting, error, paused, unknown]
+
+    InstanceHandle:
+      type: object
+      required: [id, name, provider]
+      properties:
+        id:
+          type: string
+          description: Unique instance ID (name@provider)
+        name:
+          type: string
+        provider:
+          $ref: '#/components/schemas/ProviderType'
+        state:
+          $ref: '#/components/schemas/InstanceState'
+        ip_address:
+          type: string
+          example: 10.10.0.5
+        ip_addresses:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+
+    InstanceSpec:
+      type: object
+      required: [name, provider]
+      properties:
+        name:
+          type: string
+          example: web01
+        provider:
+          $ref: '#/components/schemas/ProviderType'
+        image:
+          type: string
+          example: 14.3-RELEASE-amd64
+        cpus:
+          type: integer
+          example: 2
+        memory:
+          type: integer
+          description: Memory in MB
+          example: 1024
+        disk:
+          type: integer
+          description: Disk size in GB
+          example: 20
+        vnet:
+          type: boolean
+          description: Enable VNET networking (jail only)
+        ip_address:
+          type: string
+          example: 10.10.0.5
+        hostname:
+          type: string
+        env:
+          type: object
+          additionalProperties:
+            type: string
+        ports:
+          type: array
+          items:
+            $ref: '#/components/schemas/PortMapping'
+        auto_start:
+          type: boolean
+        metadata:
+          type: object
+          additionalProperties: true
+
+    PortMapping:
+      type: object
+      required: [host_port, instance_port]
+      properties:
+        host_port:
+          type: integer
+          example: 8080
+        instance_port:
+          type: integer
+          example: 80
+        protocol:
+          type: string
+          enum: [tcp, udp]
+          default: tcp
+
+    ExecRequest:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: array
+          items:
+            type: string
+          example: ["/bin/sh", "-c", "uname -a"]
+        env:
+          type: object
+          additionalProperties:
+            type: string
+        user:
+          type: string
+          default: root
+        workdir:
+          type: string
+          default: /
+
+    ExecResult:
+      type: object
+      properties:
+        exit_code:
+          type: integer
+        stdout:
+          type: string
+        stderr:
+          type: string
+
+    SnapshotInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        size:
+          type: integer
+          description: Size in bytes
+
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        progress:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        result:
+          type: object
+          additionalProperties: true
+        error:
+          type: string
+
+    Image:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        arch:
+          type: string
+        provider:
+          $ref: '#/components/schemas/ProviderType'
+        size:
+          type: integer
+        downloaded:
+          type: boolean
+        path:
+          type: string
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        version:
+          type: string
+        uptime:
+          type: string
+        providers:
+          type: object
+          additionalProperties:
+            type: string
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+
+    ProviderInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ProviderType'
+        available:
+          type: boolean
+        capabilities:
+          type: array
+          items:
+            type: string
+          example: [snapshots, clones, exec, console, autostart]
+
+    MetricsResponse:
+      type: object
+      properties:
+        instances_total:
+          type: integer
+        instances_running:
+          type: integer
+        instances_stopped:
+          type: integer
+        jobs_total:
+          type: integer
+        jobs_running:
+          type: integer
+
+    AutoStartEntry:
+      type: object
+      properties:
+        instance_id:
+          type: string
+        priority:
+          type: integer
+          description: Start order (lower = starts first)
+        delay:
+          type: integer
+          description: Delay in seconds after previous instance
+
+    FirewallRule:
+      type: object
+      properties:
+        id:
+          type: string
+        instance_id:
+          type: string
+        host_port:
+          type: integer
+        instance_port:
+          type: integer
+        protocol:
+          type: string
+          enum: [tcp, udp]
+        enabled:
+          type: boolean
+
+    Stack:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        instances:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstanceSpec'
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+  parameters:
+    InstanceId:
+      name: id
+      in: path
+      required: true
+      description: Instance ID (name or name@provider)
+      schema:
+        type: string
+        example: web01
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns daemon health status. Does not require authentication.
+      operationId: getHealth
+      security: []
+      tags: [System]
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Unhealthy
+
+  /metrics:
+    get:
+      summary: Instance metrics
+      operationId: getMetrics
+      tags: [System]
+      responses:
+        '200':
+          description: Metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsResponse'
+
+  /metrics/prometheus:
+    get:
+      summary: Prometheus metrics
+      operationId: getPrometheusMetrics
+      tags: [System]
+      responses:
+        '200':
+          description: Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /security/status:
+    get:
+      summary: Security configuration status
+      operationId: getSecurityStatus
+      tags: [System]
+      responses:
+        '200':
+          description: Security status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tls_enabled:
+                    type: boolean
+                  auth_enabled:
+                    type: boolean
+                  rate_limiting:
+                    type: boolean
+
+  /api/v1/providers:
+    get:
+      summary: List providers
+      operationId: listProviders
+      tags: [Providers]
+      responses:
+        '200':
+          description: List of registered providers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderInfo'
+
+  /api/v1/providers/{name}:
+    get:
+      summary: Get provider details
+      operationId: getProvider
+      tags: [Providers]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Provider details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderInfo'
+        '404':
+          description: Provider not found
+
+  /api/v1/instances:
+    get:
+      summary: List all instances
+      operationId: listInstances
+      tags: [Instances]
+      parameters:
+        - name: provider
+          in: query
+          schema:
+            $ref: '#/components/schemas/ProviderType'
+          description: Filter by provider type
+        - name: state
+          in: query
+          schema:
+            $ref: '#/components/schemas/InstanceState'
+          description: Filter by state
+      responses:
+        '200':
+          description: List of instances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InstanceHandle'
+    post:
+      summary: Create an instance
+      operationId: createInstance
+      tags: [Instances]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstanceSpec'
+            examples:
+              jail:
+                summary: Create a jail
+                value:
+                  name: web01
+                  provider: jail
+                  image: 14.3-RELEASE-amd64
+                  cpus: 2
+                  memory: 1024
+                  vnet: true
+              bhyve:
+                summary: Create a bhyve VM
+                value:
+                  name: vm01
+                  provider: bhyve
+                  image: cloud:ubuntu-24.04
+                  cpus: 4
+                  memory: 4096
+                  disk: 40
+      responses:
+        '201':
+          description: Instance created synchronously
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceHandle'
+        '202':
+          description: Instance creation submitted as async job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Instance already exists
+
+  /api/v1/instances/{id}:
+    get:
+      summary: Get instance details
+      operationId: getInstance
+      tags: [Instances]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: Instance details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceHandle'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete an instance
+      operationId: deleteInstance
+      tags: [Instances]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+        - name: force
+          in: query
+          schema:
+            type: boolean
+          description: Force delete even if running
+      responses:
+        '204':
+          description: Instance deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Update instance properties
+      operationId: updateInstance
+      tags: [Instances]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cpus:
+                  type: integer
+                memory:
+                  type: integer
+                hostname:
+                  type: string
+                metadata:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Instance updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstanceHandle'
+
+  /api/v1/instances/{id}/start:
+    post:
+      summary: Start an instance
+      operationId: startInstance
+      tags: [Instances]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: Instance started
+        '409':
+          description: Instance already running
+
+  /api/v1/instances/{id}/stop:
+    post:
+      summary: Stop an instance
+      operationId: stopInstance
+      tags: [Instances]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force:
+                  type: boolean
+                  description: Force kill (SIGKILL)
+                timeout:
+                  type: integer
+                  description: Graceful shutdown timeout in seconds
+      responses:
+        '200':
+          description: Instance stopped
+
+  /api/v1/instances/{id}/restart:
+    post:
+      summary: Restart an instance
+      operationId: restartInstance
+      tags: [Instances]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: Instance restarted
+
+  /api/v1/instances/{id}/exec:
+    post:
+      summary: Execute a command inside an instance
+      operationId: execInInstance
+      tags: [Instances]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecRequest'
+      responses:
+        '200':
+          description: Command output
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecResult'
+
+  /api/v1/instances/{id}/metrics:
+    get:
+      summary: Get instance resource metrics
+      operationId: getInstanceMetrics
+      tags: [Instances]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: CPU, memory, network usage
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cpu_percent:
+                    type: number
+                  memory_used:
+                    type: integer
+                  memory_total:
+                    type: integer
+                  network_rx_bytes:
+                    type: integer
+                  network_tx_bytes:
+                    type: integer
+
+  /api/v1/instances/{id}/health:
+    get:
+      summary: Get instance health status
+      operationId: getInstanceHealth
+      tags: [Instances]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: Health check result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  healthy:
+                    type: boolean
+                  message:
+                    type: string
+
+  /api/v1/instances/{id}/events:
+    get:
+      summary: Get instance events
+      operationId: getInstanceEvents
+      tags: [Instances]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: Event list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    message:
+                      type: string
+                    timestamp:
+                      type: string
+                      format: date-time
+
+  /api/v1/instances/{id}/interfaces:
+    get:
+      summary: List network interfaces
+      operationId: listInterfaces
+      tags: [Networking]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: Network interfaces
+
+  /api/v1/instances/{id}/freebsd/rctl:
+    get:
+      summary: Get RCTL resource limits (FreeBSD jails)
+      operationId: getRctlLimits
+      tags: [FreeBSD]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: RCTL limits
+    put:
+      summary: Set RCTL resource limits (FreeBSD jails)
+      operationId: setRctlLimits
+      tags: [FreeBSD]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: Limits applied
+
+  /api/v1/instances/{id}/freebsd/vnet:
+    get:
+      summary: Get VNET status (FreeBSD jails)
+      operationId: getVnetStatus
+      tags: [FreeBSD]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: VNET configuration
+
+  /api/v1/instances/{id}/media:
+    get:
+      summary: List attached media (bhyve/QEMU)
+      operationId: listMedia
+      tags: [Storage]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: Attached media list
+    post:
+      summary: Attach media (ISO)
+      operationId: attachMedia
+      tags: [Storage]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+                type:
+                  type: string
+                  enum: [cdrom, disk]
+      responses:
+        '200':
+          description: Media attached
+
+  /api/v1/instances/{id}/boot-order:
+    get:
+      summary: Get boot order (bhyve/QEMU)
+      operationId: getBootOrder
+      tags: [Storage]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: Boot order
+    put:
+      summary: Set boot order
+      operationId: setBootOrder
+      tags: [Storage]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                order:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Boot order updated
+
+  /api/v1/jobs:
+    get:
+      summary: List jobs
+      operationId: listJobs
+      tags: [Jobs]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, completed, failed, cancelled]
+        - name: type
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Job'
+
+  /api/v1/jobs/stats:
+    get:
+      summary: Job queue statistics
+      operationId: getJobStats
+      tags: [Jobs]
+      responses:
+        '200':
+          description: Queue stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  pending:
+                    type: integer
+                  running:
+                    type: integer
+                  completed:
+                    type: integer
+                  failed:
+                    type: integer
+
+  /api/v1/jobs/{id}:
+    get:
+      summary: Get job status
+      operationId: getJob
+      tags: [Jobs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete a completed/failed job
+      operationId: deleteJob
+      tags: [Jobs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Job deleted
+
+  /api/v1/jobs/{id}/cancel:
+    post:
+      summary: Cancel a running job
+      operationId: cancelJob
+      tags: [Jobs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job cancelled
+        '409':
+          description: Job already completed
+
+  /api/v1/images:
+    get:
+      summary: List downloaded images
+      operationId: listImages
+      tags: [Images]
+      parameters:
+        - name: provider
+          in: query
+          schema:
+            $ref: '#/components/schemas/ProviderType'
+      responses:
+        '200':
+          description: Image list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Image'
+
+  /api/v1/images/fetch:
+    post:
+      summary: Download an image
+      operationId: fetchImage
+      tags: [Images]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  example: 14.3-RELEASE-amd64
+                provider:
+                  $ref: '#/components/schemas/ProviderType'
+      responses:
+        '202':
+          description: Download started (async job)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+
+  /api/v1/images/refresh:
+    post:
+      summary: Refresh image catalog
+      operationId: refreshImageCatalog
+      tags: [Images]
+      responses:
+        '200':
+          description: Catalog refreshed
+
+  /api/v1/images/{name}:
+    delete:
+      summary: Delete a downloaded image
+      operationId: deleteImage
+      tags: [Images]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Image deleted
+
+  /api/v1/autostart:
+    get:
+      summary: List auto-start entries
+      operationId: listAutoStart
+      tags: [AutoStart]
+      responses:
+        '200':
+          description: Auto-start list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AutoStartEntry'
+
+  /api/v1/autostart/{id}:
+    put:
+      summary: Enable auto-start for an instance
+      operationId: enableAutoStart
+      tags: [AutoStart]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                priority:
+                  type: integer
+                delay:
+                  type: integer
+      responses:
+        '200':
+          description: Auto-start enabled
+    delete:
+      summary: Disable auto-start for an instance
+      operationId: disableAutoStart
+      tags: [AutoStart]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Auto-start disabled
+
+  /api/v1/firewall/{instance_id}:
+    get:
+      summary: List firewall rules for an instance
+      operationId: listFirewallRules
+      tags: [Firewall]
+      parameters:
+        - name: instance_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Firewall rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FirewallRule'
+    post:
+      summary: Add firewall rule (port forward)
+      operationId: addFirewallRule
+      tags: [Firewall]
+      parameters:
+        - name: instance_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FirewallRule'
+      responses:
+        '201':
+          description: Rule created
+    delete:
+      summary: Remove firewall rule
+      operationId: removeFirewallRule
+      tags: [Firewall]
+      parameters:
+        - name: instance_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: host_port
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: protocol
+          in: query
+          schema:
+            type: string
+            enum: [tcp, udp]
+      responses:
+        '204':
+          description: Rule removed
+
+  /api/v1/stacks:
+    get:
+      summary: List stacks
+      operationId: listStacks
+      tags: [Stacks]
+      responses:
+        '200':
+          description: Stack list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Stack'
+    post:
+      summary: Deploy a stack
+      operationId: deployStack
+      tags: [Stacks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Stack'
+      responses:
+        '202':
+          description: Stack deployment started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+
+  /api/v1/stacks/{name}:
+    get:
+      summary: Get stack details
+      operationId: getStack
+      tags: [Stacks]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stack details
+    delete:
+      summary: Destroy a stack
+      operationId: destroyStack
+      tags: [Stacks]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Destruction started
+
+  /api/v1/network/bridges:
+    get:
+      summary: List network bridges
+      operationId: listBridges
+      tags: [Networking]
+      responses:
+        '200':
+          description: Bridge list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    members:
+                      type: array
+                      items:
+                        type: string
+                    ip_address:
+                      type: string
+
+  /api/v1/import:
+    post:
+      summary: Import an instance from archive
+      operationId: importInstance
+      tags: [Instances]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path, name, provider]
+              properties:
+                path:
+                  type: string
+                name:
+                  type: string
+                provider:
+                  $ref: '#/components/schemas/ProviderType'
+      responses:
+        '202':
+          description: Import started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+
+  /api/v1/console/sessions:
+    get:
+      summary: List active console sessions
+      operationId: listConsoleSessions
+      tags: [Console]
+      responses:
+        '200':
+          description: Console sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    instance_id:
+                      type: string
+                    created_at:
+                      type: string
+                      format: date-time
+
+  /api/v1/volumes:
+    get:
+      summary: List volumes
+      operationId: listVolumes
+      tags: [Storage]
+      responses:
+        '200':
+          description: Volume list
+    post:
+      summary: Create a volume
+      operationId: createVolume
+      tags: [Storage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, size]
+              properties:
+                name:
+                  type: string
+                size:
+                  type: integer
+                  description: Size in GB
+      responses:
+        '201':
+          description: Volume created
+
+  /api/v1/backups:
+    get:
+      summary: List backups
+      operationId: listBackups
+      tags: [Backups]
+      responses:
+        '200':
+          description: Backup list
+    post:
+      summary: Create a backup
+      operationId: createBackup
+      tags: [Backups]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [instance_id]
+              properties:
+                instance_id:
+                  type: string
+                destination:
+                  type: string
+      responses:
+        '202':
+          description: Backup started
+
+  /api/v1/instances/{id}/services:
+    get:
+      summary: List services inside an instance
+      operationId: listInstanceServices
+      tags: [Instances]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: Service list
+
+  /api/v1/instances/{id}/port-forwards:
+    get:
+      summary: List a provider's own port-forwarding rules
+      description: >
+        Distinct from /api/v1/firewall/expose, which records rules in Hospitus's
+        firewall state. This asks the provider what it is forwarding itself, and
+        answers 501 for a provider that does not forward ports.
+      operationId: listInstancePortForwards
+      tags: [Networking]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: Rule list
+        '501':
+          description: Provider does not support port forwarding
+    post:
+      summary: Add a port-forwarding rule to an instance
+      operationId: addInstancePortForward
+      tags: [Networking]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: Rule added
+        '501':
+          description: Provider does not support port forwarding
+    delete:
+      summary: Remove a port-forwarding rule from an instance
+      operationId: removeInstancePortForward
+      tags: [Networking]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: Rule removed
+        '501':
+          description: Provider does not support port forwarding
+
+  /api/v1/instances/{id}/freebsd/vnet:
+    get:
+      summary: Report an instance's VNET configuration
+      operationId: getInstanceVNET
+      tags: [Networking]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: VNET configuration
+
+  /api/v1/instances/{id}/freebsd/vnet/enable:
+    post:
+      summary: Enable VNET on a jail
+      description: FreeBSD only; the instance must be stopped.
+      operationId: enableInstanceVNET
+      tags: [Networking]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: VNET enabled
+
+  /api/v1/instances/{id}/freebsd/vnet/disable:
+    post:
+      summary: Disable VNET on a jail
+      description: FreeBSD only; the instance must be stopped.
+      operationId: disableInstanceVNET
+      tags: [Networking]
+      parameters:
+        - $ref: '#/components/parameters/InstanceId'
+      responses:
+        '200':
+          description: VNET disabled
+
+  /api/v1/auth/keys:
+    get:
+      summary: List API keys
+      description: Keys are returned by id and metadata; the secret is shown once, when created.
+      operationId: listAPIKeys
+      tags: [System]
+      responses:
+        '200':
+          description: Key list
+    post:
+      summary: Create an API key
+      operationId: createAPIKey
+      tags: [System]
+      responses:
+        '201':
+          description: Key created, secret returned once
+
+  /api/v1/auth/keys/{keyId}:
+    delete:
+      summary: Revoke an API key
+      operationId: revokeAPIKey
+      tags: [System]
+      parameters:
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Key revoked
+
+tags:
+  - name: System
+    description: Health, metrics, and system status
+  - name: Providers
+    description: Virtualization backend management
+  - name: Instances
+    description: Instance lifecycle (create, start, stop, delete)
+  - name: Jobs
+    description: Async job management
+  - name: Images
+    description: Image catalog and downloads
+  - name: Storage
+    description: Volumes, snapshots, ZFS datasets
+  - name: Networking
+    description: Bridges, interfaces, port forwarding
+  - name: Firewall
+    description: PF NAT rules and port forwarding
+  - name: AutoStart
+    description: Boot-time auto-start configuration
+  - name: Stacks
+    description: Multi-instance orchestration
+  - name: Console
+    description: Interactive console sessions (WebSocket)
+  - name: Backups
+    description: Instance backup and restore
+  - name: FreeBSD
+    description: FreeBSD-specific features (RCTL, VNET)
