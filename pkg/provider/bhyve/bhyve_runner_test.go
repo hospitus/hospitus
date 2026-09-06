@@ -12,12 +12,12 @@ import (
 
 func TestDeleteSnapshotRunsZFSDestroy(t *testing.T) {
 	fake := &execx.Fake{}
-	p := &BhyveProvider{runner: fake}
+	p := &BhyveProvider{runner: fake, zfsParent: testZFSParent}
 
 	snap := provider.SnapshotHandle{
 		ID:       "web_snap1",
 		Instance: "web",
-		Metadata: map[string]interface{}{"zfs_name": "zroot/hospitus/bhyve/web@snap1"},
+		Metadata: map[string]interface{}{"zfs_name": testZFSParent + "/web/disk0@snap1"},
 	}
 	if err := p.DeleteSnapshot(context.Background(), snap); err != nil {
 		t.Fatalf("DeleteSnapshot: %v", err)
@@ -26,7 +26,7 @@ func TestDeleteSnapshotRunsZFSDestroy(t *testing.T) {
 		t.Fatalf("expected 1 command, got %d", len(fake.Calls))
 	}
 	got := strings.Join(fake.Calls[0].Args, " ")
-	if got != "destroy zroot/hospitus/bhyve/web@snap1" {
+	if got != "destroy "+testZFSParent+"/web/disk0@snap1" {
 		t.Errorf("zfs args = %q, want destroy of the snapshot", got)
 	}
 }
@@ -45,10 +45,10 @@ func TestDeleteSnapshotPropagatesError(t *testing.T) {
 	// The handle has to pass the ownership guard, or the refusal it gets there
 	// is the error this test sees — and zfs never runs at all, which is not
 	// what "propagates the error from zfs" means.
-	p := &BhyveProvider{runner: fake, zfsParent: "zroot/hospitus/bhyve"}
+	p := &BhyveProvider{runner: fake, zfsParent: testZFSParent}
 	snap := provider.SnapshotHandle{
 		Instance: "web",
-		Metadata: map[string]interface{}{"zfs_name": "zroot/hospitus/bhyve/web/disk0@s"},
+		Metadata: map[string]interface{}{"zfs_name": testZFSParent + "/web/disk0@s"},
 	}
 	err := p.DeleteSnapshot(context.Background(), snap)
 	if err == nil {
