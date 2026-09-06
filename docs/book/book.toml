@@ -1,0 +1,19 @@
+[book]
+authors = ["Hospitus Contributors"]
+language = "en"
+src = "src"
+title = "The Hospitus Book"
+description = "Comprehensive guide to multi-platform virtualization with Hospitus"
+
+[build]
+build-dir = "../public"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/hospitus/hospitus"
+edit-url-template = "https://github.com/hospitus/hospitus/edit/main/docs/book/src/{path}"
+
+[output.html.search]
+enable = true
+limit-results = 30
