@@ -332,8 +332,15 @@ type Metrics struct {
 	MemoryTotalMB   int64
 	DiskReadBytes   int64
 	DiskWriteBytes  int64
-	NetRxBytes      int64
-	NetTxBytes      int64
+
+	// DiskReadBytesPerSec and DiskWriteBytesPerSec are rates, not totals. Some
+	// sources report only rates — FreeBSD's rctl gives readbps/writebps — and
+	// storing those in the cumulative fields above makes a consumer's delta
+	// between two samples meaningless.
+	DiskReadBytesPerSec  int64
+	DiskWriteBytesPerSec int64
+	NetRxBytes           int64
+	NetTxBytes           int64
 }
 
 // InstanceAddressProvider is an optional interface for reporting the addresses
