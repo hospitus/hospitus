@@ -1,0 +1,181 @@
+# CI/CD Runner VM
+#
+# A GitLab Runner or GitHub Actions self-hosted runner VM.
+# Provisioned with cloud-init for automatic registration.
+#
+# Supports:
+# - Docker executor for containerized builds
+# - Shell executor for native builds
+# - Multi-runner configuration
+#
+# Prerequisites:
+# - Cloud image: hospitus image fetch cloud:ubuntu-24.04
+# - GitLab/GitHub registration token
+#
+# Usage:
+#   # Edit the registration token below first!
+#   hospitus apply --start ci-runner.toml
+#   ssh -p 2240 runner@<host-ip>
+
+[workload]
+api_version = "hospitus.io/v1"
+name = "{{ .name | default `ci-runner` }}"
+
+[workload.labels]
+app = "gitlab-runner"
+environment = "ci"
+executor = "docker"
+
+[workload.annotations]
+description = "Self-hosted CI/CD runner with Docker executor"
+gitlab_url = "https://gitlab.com"
+ssh_port = "2240"
+
+[provider]
+type = "bhyve"
+
+[image]
+source = "cloud:ubuntu-24.04-amd64"
+arch = "{{ .os_arch | default `amd64` }}"
+
+[resources]
+cpu = 8
+memory = "16Gi"
+
+# Root disk for OS and Docker images
+[storage.root_disk]
+size = "{{ .disk_size | default `20Gi` }}"
+type = "zvol"
+
+# Build cache volume for faster builds
+[[storage.volumes]]
+name = "docker-cache"
+size = "{{ .cache_size | default `20Gi` }}"
+mount_path = "/var/lib/docker"
+
+[storage.volumes.zfs]
+compression = "lz4"
+
+[lifecycle]
+stop_timeout = 30
+
+[lifecycle.hooks]
+# Host-side hooks run as shell on the daemon host, around every start and stop.
+# pre_create below runs once, when the instance is created; these run each time.
+# The cache directory is recreated here because a host reboot or a cleanup job
+# may have taken it away since the VM was created.
+pre_start = "install -d -m 0755 {{ .nas_pool | default `/zroot/hospitus` }}/ci-runner/docker"
+post_start = "logger -t hospitus 'ci-runner started'"
+pre_stop = "logger -t hospitus 'ci-runner stopping, letting running jobs finish'"
+
+[[lifecycle.hooks.pre_create]]
+type = "exec"
+# Without the cache directory the runner has nowhere to write, so a failure
+# here aborts creation rather than leaving a half-built instance.
+on_failure = "stop"
+commands = ["mkdir -p {{ .nas_pool | default `/zroot/hospitus` }}/ci-runner/docker"]
+
+[[lifecycle.hooks.post_create]]
+type = "exec"
+on_failure = "continue"
+commands = ["echo 'CI runner docker cache ready'"]
+
+[[networks]]
+name = "runner"
+type = "nat"
+bridge = "hospitus0"
+
+[networks.ip]
+mode = "dhcp"
+dns = ["8.8.8.8", "1.1.1.1"]
+
+# SSH access
+[[networks.ports]]
+host = 2240
+container = 22
+protocol = "tcp"
+
+# Cloud-init for runner setup
+[cloud_init]
+enabled = true
+hostname = "ci-runner"
+
+packages = [
+    "curl",
+    "git",
+    "build-essential",
+    "apt-transport-https",
+    "ca-certificates",
+    "gnupg",
+    "lsb-release"
+]
+
+runcmd = [
+    # Install Docker
+    "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg",
+    "echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu noble stable' > /etc/apt/sources.list.d/docker.list",
+    "apt-get update",
+    "apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin",
+    "systemctl enable docker",
+    "systemctl start docker",
+    # Add runner user to docker group
+    "usermod -aG docker runner",
+    # Install GitLab Runner
+    "curl -L 'https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh' | bash",
+    "apt-get install -y gitlab-runner",
+    # Configure GitLab Runner (uncomment and fill in your details)
+    # "gitlab-runner register --non-interactive --url 'https://gitlab.com' --registration-token 'YOUR_TOKEN' --executor 'docker' --docker-image 'alpine:latest' --description 'hospitus-runner' --tag-list 'hospitus,docker'",
+    # Optimize Docker for CI
+    "echo '{\"storage-driver\": \"overlay2\", \"log-driver\": \"json-file\", \"log-opts\": {\"max-size\": \"10m\", \"max-file\": \"3\"}}' > /etc/docker/daemon.json",
+    "systemctl restart docker",
+    # Signal ready
+    "echo 'CI runner ready for registration!' | tee /var/log/ci-runner-ready"
+]
+
+# Custom user-data for additional configuration
+# Uncomment and modify for GitHub Actions runner
+user_data = """
+# To register GitLab Runner, SSH in and run:
+# sudo gitlab-runner register
+
+# For GitHub Actions runner:
+# 1. Download: curl -o actions-runner.tar.gz -L https://github.com/actions/runner/releases/download/v2.311.0/actions-runner-linux-x64-2.311.0.tar.gz
+# 2. Extract: tar xzf actions-runner.tar.gz
+# 3. Configure: ./config.sh --url https://github.com/YOUR_ORG --token YOUR_TOKEN
+# 4. Start: ./run.sh
+"""
+
+ssh_authorized_keys = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample... your-key-comment"
+]
+
+[[cloud_init.users]]
+name = "runner"
+sudo = "ALL=(ALL) NOPASSWD:ALL"
+shell = "/bin/bash"
+groups = ["sudo", "docker"]
+lock_passwd = true
+ssh_authorized_keys = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample... your-key-comment"
+]
+
+[lifecycle.autostart]
+enabled = true
+priority = 50
+
+[lifecycle.health_check]
+command = ["pgrep", "."]
+interval = "30s"
+timeout = "10s"
+retries = 5
+start_period = "120s"
+
+[environment]
+LANG = "en_US.UTF-8"
+
+[provider_overrides.bhyve]
+bootloader = "uefi"
+console_type = "virtio"
+vnc = "127.0.0.1:5915"
+# Boot disk must use ahci-hd with UEFI — OVMF firmware has no virtio-blk driver.
+disk_driver = "ahci-hd"

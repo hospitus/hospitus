@@ -1,0 +1,226 @@
+# hospitus.io/v1 Stack manifest for WordPress
+# Category: Web Hosting
+
+[stack]
+name = "{{ .name | default `wordpress` }}"
+api_version = "hospitus.io/v1"
+
+[[instances]]
+name = "db"
+provider = "jail"
+
+[instances.image]
+source = "freebsd:{{ .os_version | default `14.3-RELEASE` }}"
+arch = "{{ .os_arch | default `amd64` }}"
+
+[instances.resources]
+cpu = 1
+memory = "1Gi"
+
+# The database and the web jail share this segment and nothing else reaches it.
+# sticky pins each MAC to the port it was learned on, so neither jail can claim
+# the other's address; vlan tags the segment when wpint sits on a trunk; mtu
+# leaves room for an encapsulation header when the bridge crosses a tunnel.
+[[instances.networks]]
+name = "wp-internal"
+type = "bridge"
+bridge = "wpint"
+ip_pool = "10.31.0.0/24"
+bridge_flags = ["sticky"]
+vlan = {{ .internal_vlan | default `31` }}
+mtu = 1400
+
+[instances.networks.ip]
+mode = "static"
+address = "10.31.0.2/24"
+
+# wp-internal carries no route off the segment, and this jail installs its
+# database from the FreeBSD package mirrors. A second interface on the NAT
+# bridge gives it the way out — the web jail below has had one all along, and
+# needs it for exactly the same reason.
+[[instances.networks]]
+name = "public"
+type = "bridge"
+bridge = "{{ .bridge | default `hospitus0` }}"
+
+[instances.networks.ip]
+mode = "dhcp"
+
+[[instances.storage.volumes]]
+name = "db-data"
+host_path = "{{ .nas_pool | default `/zroot/hospitus` }}/web/wp-db"
+mount_path = "/var/db/mysql"
+
+[[instances.storage.volumes]]
+name = "pkg-cache"
+host_path = "{{ .nas_pool | default `/zroot/hospitus` }}/pkg-cache"
+mount_path = "/var/cache/pkg"
+
+[instances.lifecycle]
+stop_timeout = 30
+
+[instances.lifecycle.autostart]
+enabled = true
+priority = 50
+
+[instances.lifecycle.health_check]
+# mysqladmin ping answers only once the server accepts connections on its
+# socket, which is what the app jail is waiting for. A running mysqld process
+# is not the same thing: it spends its first seconds recovering tables.
+command = ["mysqladmin", "ping"]
+interval = "30s"
+timeout = "10s"
+retries = 5
+start_period = "120s"
+
+[instances.lifecycle.hooks]
+[[instances.lifecycle.hooks.pre_create]]
+type = "exec"
+commands = ["mkdir -p {{ .nas_pool | default `/zroot/hospitus` }}/web/wp-db"]
+
+[[instances.lifecycle.hooks.post_create]]
+type = "exec"
+commands = [
+  "mkdir -p /usr/local/etc/pkg/repos",
+  # A quarterly package can carry a higher __FreeBSD_version than the image:
+  # FreeBSD:14 is built on the newest supported point release, not on 14.3.
+  # pkg would stop and prompt, which a non-interactive hook cannot answer.
+  "sh -c 'mkdir -p /usr/local/etc && { grep -qs IGNORE_OSVERSION /usr/local/etc/pkg.conf || echo IGNORE_OSVERSION=true >> /usr/local/etc/pkg.conf; }'",
+  # pkg follows AAAA records even where nothing routes IPv6, and then fails
+  # with "Address family for host not supported". A default route is not the
+  # test: a VNET jail on a LAN that sends router advertisements installs one
+  # by SLAAC, whichever way the host is configured, and it leads nowhere.
+  # Ask whether the repository actually answers over IPv6 instead, so a real
+  # dual-stack host is left alone and everyone else is pinned to IPv4.
+  "sh -c 'grep -qs IP_VERSION /usr/local/etc/pkg.conf || fetch -6 -q -T 5 -o /dev/null http://pkg.FreeBSD.org/ 2>/dev/null || echo IP_VERSION=4 >> /usr/local/etc/pkg.conf'",
+  "sh -c \"REPO_TYPE='{{ .pkg_repo | default `auto` }}'; if [ \\$REPO_TYPE = 'auto' ]; then if uname -m | grep -q 'arm64' || uname -r | grep -Eq 'CURRENT|STABLE'; then REPO_TYPE='latest'; else REPO_TYPE='quarterly'; fi; fi; REPO_NAME='FreeBSD'; if [ \\$(uname -r | cut -d. -f1) -ge 15 ]; then REPO_NAME='FreeBSD-ports'; fi; printf '%s: { url: \\\"http://pkg.FreeBSD.org/\\${ABI}/%s\\\" }\\n' \\$REPO_NAME \\$REPO_TYPE > /usr/local/etc/pkg/repos/FreeBSD.conf\"",
+  "env ASSUME_ALWAYS_YES=yes pkg bootstrap -f",
+  "pkg update -f",
+  "pkg install -y mariadb114-server",
+  "sysrc mysql_enable=YES",
+  "service mysql-server start",
+  # Wait on what the next command needs: mysqladmin ping answers over the unix
+  # socket the mysql client uses. Watching for a listening port 3306 waits on
+  # something else — MariaDB serves the socket first, and may not open the port
+  # at all — so the CREATE DATABASE below ran against a server that was not
+  # accepting connections yet.
+  "sh -c 'for i in $(jot 60); do mysqladmin ping >/dev/null 2>&1 && break; sleep 1; done'",
+  "mysql -e \"CREATE DATABASE IF NOT EXISTS wordpress;\"",
+  "mysql -e \"CREATE USER IF NOT EXISTS 'wp_user'@'%' IDENTIFIED BY '{{ secret `wp_db_pass` }}';\"",
+  "mysql -e \"GRANT ALL PRIVILEGES ON wordpress.* TO 'wp_user'@'%';\"",
+  "mysql -e \"FLUSH PRIVILEGES;\""
+]
+
+[[instances]]
+name = "app"
+provider = "jail"
+
+[instances.image]
+source = "freebsd:{{ .os_version | default `14.3-RELEASE` }}"
+arch = "{{ .os_arch | default `amd64` }}"
+
+[instances.resources]
+cpu = 2
+memory = "1Gi"
+
+# Same segment as the database, so the same three settings must match.
+[[instances.networks]]
+name = "wp-internal"
+type = "bridge"
+bridge = "wpint"
+ip_pool = "10.31.0.0/24"
+bridge_flags = ["sticky"]
+vlan = {{ .internal_vlan | default `31` }}
+mtu = 1400
+
+[instances.networks.ip]
+mode = "static"
+address = "10.31.0.3/24"
+gateway = "10.31.0.1"
+
+[[instances.networks]]
+name = "public"
+type = "bridge"
+bridge = "{{ .bridge | default `hospitus0` }}"
+
+[instances.networks.ip]
+mode = "dhcp"
+
+[instances.provider_overrides.jail.parameters]
+"allow.reserved_ports" = true
+
+[[instances.networks.ports]]
+host = {{ .http_port | default 8082 }}
+container = 80
+protocol = "tcp"
+
+[[instances.storage.volumes]]
+name = "wp-content"
+host_path = "{{ .nas_pool | default `/zroot/hospitus` }}/web/wp-content"
+mount_path = "/usr/local/www/wordpress"
+
+[[instances.storage.volumes]]
+name = "pkg-cache"
+host_path = "{{ .nas_pool | default `/zroot/hospitus` }}/pkg-cache"
+mount_path = "/var/cache/pkg"
+
+[instances.lifecycle]
+stop_timeout = 30
+
+[instances.lifecycle.autostart]
+enabled = true
+priority = 50
+
+[instances.lifecycle.health_check]
+command = ["fetch", "-T", "5", "-qo", "/dev/null", "http://127.0.0.1:80"]
+interval = "30s"
+timeout = "10s"
+retries = 5
+start_period = "120s"
+
+[instances.lifecycle.hooks]
+[[instances.lifecycle.hooks.pre_create]]
+type = "exec"
+commands = ["mkdir -p {{ .nas_pool | default `/zroot/hospitus` }}/web/wp-content"]
+
+[[instances.lifecycle.hooks.post_create]]
+type = "exec"
+commands = [
+  "mkdir -p /usr/local/etc/pkg/repos",
+  # A quarterly package can carry a higher __FreeBSD_version than the image:
+  # FreeBSD:14 is built on the newest supported point release, not on 14.3.
+  # pkg would stop and prompt, which a non-interactive hook cannot answer.
+  "sh -c 'mkdir -p /usr/local/etc && { grep -qs IGNORE_OSVERSION /usr/local/etc/pkg.conf || echo IGNORE_OSVERSION=true >> /usr/local/etc/pkg.conf; }'",
+  "sh -c \"REPO_TYPE='{{ .pkg_repo | default `auto` }}'; if [ \\$REPO_TYPE = 'auto' ]; then if uname -m | grep -q 'arm64' || uname -r | grep -Eq 'CURRENT|STABLE'; then REPO_TYPE='latest'; else REPO_TYPE='quarterly'; fi; fi; REPO_NAME='FreeBSD'; if [ \\$(uname -r | cut -d. -f1) -ge 15 ]; then REPO_NAME='FreeBSD-ports'; fi; printf '%s: { url: \\\"http://pkg.FreeBSD.org/\\${ABI}/%s\\\" }\\n' \\$REPO_NAME \\$REPO_TYPE > /usr/local/etc/pkg/repos/FreeBSD.conf\"",
+  "env ASSUME_ALWAYS_YES=yes pkg bootstrap -f",
+  "pkg update -f",
+  # The extensions have to match the PHP the wordpress package depends on.
+  # Asking for a different major version conflicts on shared .ini files, and
+  # pkg resolves that by dropping wordpress: the install reports success and
+  # leaves an empty document root behind.
+  "pkg install -y apache24 wordpress php{{ .php_version | default `84` }}-mysqli php{{ .php_version | default `84` }}-curl php{{ .php_version | default `84` }}-gd php{{ .php_version | default `84` }}-zlib php{{ .php_version | default `84` }}-zip",
+  "sysrc apache24_enable=YES",
+  "sysrc php{{ .php_version | default `84` }}_enable=YES",
+  "echo 'AddType application/x-httpd-php .php' >> /usr/local/etc/apache24/httpd.conf",
+  "echo 'AddType application/x-httpd-php .source' >> /usr/local/etc/apache24/httpd.conf",
+  "echo 'DirectoryIndex index.php index.html' >> /usr/local/etc/apache24/httpd.conf",
+  "echo 'DocumentRoot \"/usr/local/www/wordpress\"' >> /usr/local/etc/apache24/httpd.conf",
+  "echo '<Directory \"/usr/local/www/wordpress\">' >> /usr/local/etc/apache24/httpd.conf",
+  "echo '    Options Indexes FollowSymLinks' >> /usr/local/etc/apache24/httpd.conf",
+  "echo '    AllowOverride All' >> /usr/local/etc/apache24/httpd.conf",
+  "echo '    Require all granted' >> /usr/local/etc/apache24/httpd.conf",
+  "echo '</Directory>' >> /usr/local/etc/apache24/httpd.conf",
+  "mkdir -p /usr/local/www/wordpress",
+  "chown -R www:www /usr/local/www/wordpress",
+  # Start it. Everything above configures apache24 and enables it in rc.conf,
+  # and the health check below asks for a page on port 80: leaving the server
+  # stopped means the example deploys a jail that answers nothing.
+  # WordPress still shows its own installer until wp-config.php is written,
+  # which is the step this message names.
+  "service apache24 start",
+  "echo 'WordPress is serving its installer on port 80. Write wp-config.php with the database credentials to finish.'"
+]
+
+[instances.depends_on]
+services = ["db"]
+condition = "started"

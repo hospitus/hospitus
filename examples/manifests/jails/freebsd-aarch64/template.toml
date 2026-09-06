@@ -1,0 +1,77 @@
+# FreeBSD jail on ARM64, running on an amd64 host
+#
+# A jail whose binaries are ARM64. The kernel is the host's; every
+# executable inside is foreign and runs through qemu-aarch64-static, which
+# imgact_binmisc(4) invokes on its behalf. Nothing in the jail knows.
+#
+# This is the machinery poudriere uses to cross-build packages, so it is well
+# travelled — but it is emulation, and slow. It suits building and testing
+# ARM64 software on a machine that has none, not serving traffic.
+#
+# The host has to be prepared once, and Hospitus does not do it for you:
+#
+#   pkg install qemu-user-static
+#   kldload imgact_binmisc
+#   binmiscctl add aarch64 \
+#       --interpreter /usr/local/bin/qemu-aarch64-static \
+#       --magic "\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00" \
+#       --mask "\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff" \
+#       --size 20 --set-enabled
+#
+# Check it took with "binmiscctl list". Without the activator the jail is
+# created and refuses to start, complaining that /bin/sh does not exist. It
+# does; what is missing is the interpreter for it.
+#
+# The image name carries the architecture, and has to: the reference is what
+# decides which base system is downloaded.
+#
+# Usage:
+#   hospitus apply --start --pull jails/freebsd-aarch64/template.toml
+#
+# Variables: name, os_version, bridge
+
+[workload]
+api_version = "hospitus.io/v1"
+name = "{{ .name | default `freebsd-aarch64` }}"
+description = "FreeBSD jail running ARM64 binaries under emulation"
+
+[workload.labels]
+arch = "arm64"
+emulated = "true"
+
+[provider]
+type = "jail"
+
+[image]
+source = "freebsd:{{ .os_version | default `14.3-RELEASE` }}-arm64"
+arch = "arm64"
+
+# Emulation costs more than native execution, so give it room. Two cores build
+# small things without making the host unusable.
+[resources]
+cpu = 2
+memory = "2Gi"
+
+[storage.root_disk]
+size = "10Gi"
+
+[[networks]]
+name = "public"
+type = "bridge"
+bridge = "{{ .bridge | default `hospitus0` }}"
+
+[networks.ip]
+mode = "dhcp"
+
+[lifecycle]
+stop_timeout = 30
+
+[lifecycle.health_check]
+# The check runs a foreign binary and proves which one it was. Running uname
+# and ignoring its answer would succeed just as happily in an amd64 jail;
+# comparing what it says is what tells emulation working from emulation absent.
+command = ["sh", "-c", "test \"$(uname -m)\" = arm64"]
+interval = "60s"
+timeout = "30s"
+retries = 3
+start_period = "60s"

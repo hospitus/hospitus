@@ -1,0 +1,105 @@
+# hospitus.io/v1 Workload manifest for Navidrome
+# Category: Media (FreeBSD Native)
+
+[workload]
+api_version = "hospitus.io/v1"
+name = "{{ .name | default `navidrome` }}"
+
+[workload.labels]
+"hospitus.io/category" = "media"
+"hospitus.io/service" = "music"
+
+[workload.annotations]
+description = "Navidrome - Modern Music Streaming Server and Library"
+
+[provider]
+type = "jail"
+
+[image]
+source = "freebsd:{{ .os_version | default `14.3-RELEASE` }}"
+arch = "{{ .os_arch | default `amd64` }}"
+
+[resources]
+cpu = 1
+memory = "512Mi"
+
+[[networks]]
+name = "public"
+type = "bridge"
+bridge = "{{ .bridge | default `hospitus0` }}"
+
+[networks.ip]
+mode = "dhcp"
+
+[[networks.ports]]
+host = 4533
+container = 4533
+protocol = "tcp"
+
+[[storage.volumes]]
+name = "navidrome-data"
+host_path = "{{ .nas_pool | default `/zroot/hospitus` }}/apps/{{ .name | default `navidrome` }}/data"
+mount_path = "/var/db/navidrome"
+
+[[storage.volumes]]
+name = "music-library"
+host_path = "{{ .nas_pool | default `/zroot/hospitus` }}/media/music"
+mount_path = "/media/music"
+read_only = true
+
+[storage.volumes.zfs]
+compression = "lz4"
+
+
+[[storage.volumes]]
+name = "pkg-cache"
+host_path = "{{ .nas_pool | default `/zroot/hospitus` }}/pkg-cache"
+mount_path = "/var/cache/pkg"
+
+[lifecycle]
+stop_timeout = 30
+
+[lifecycle.autostart]
+enabled = true
+priority = 50
+
+[lifecycle.health_check]
+command = ["fetch", "-T", "5", "-qo", "/dev/null", "http://127.0.0.1:4533"]
+interval = "30s"
+timeout = "10s"
+retries = 5
+start_period = "120s"
+
+[lifecycle.hooks]
+[[lifecycle.hooks.pre_create]]
+type = "exec"
+commands = ["mkdir -p {{ .nas_pool | default `/zroot/hospitus` }}/apps/{{ .name | default `navidrome` }}/data {{ .nas_pool | default `/zroot/hospitus` }}/media/music"]
+
+[[lifecycle.hooks.post_create]]
+type = "exec"
+commands = [
+  "mkdir -p /usr/local/etc/pkg/repos",
+  # A quarterly package can carry a higher __FreeBSD_version than the image:
+  # FreeBSD:14 is built on the newest supported point release, not on 14.3.
+  # pkg would stop and prompt, which a non-interactive hook cannot answer.
+  "sh -c 'mkdir -p /usr/local/etc && { grep -qs IGNORE_OSVERSION /usr/local/etc/pkg.conf || echo IGNORE_OSVERSION=true >> /usr/local/etc/pkg.conf; }'",
+  # pkg follows AAAA records even where nothing routes IPv6, and then fails
+  # with "Address family for host not supported". A default route is not the
+  # test: a VNET jail on a LAN that sends router advertisements installs one
+  # by SLAAC, whichever way the host is configured, and it leads nowhere.
+  # Ask whether the repository actually answers over IPv6 instead, so a real
+  # dual-stack host is left alone and everyone else is pinned to IPv4.
+  "sh -c 'grep -qs IP_VERSION /usr/local/etc/pkg.conf || fetch -6 -q -T 5 -o /dev/null http://pkg.FreeBSD.org/ 2>/dev/null || echo IP_VERSION=4 >> /usr/local/etc/pkg.conf'",
+  "sh -c \"REPO_TYPE='{{ .pkg_repo | default `auto` }}'; if [ \\$REPO_TYPE = 'auto' ]; then if uname -m | grep -q 'arm64' || uname -r | grep -Eq 'CURRENT|STABLE'; then REPO_TYPE='latest'; else REPO_TYPE='quarterly'; fi; fi; REPO_NAME='FreeBSD'; if [ \\$(uname -r | cut -d. -f1) -ge 15 ]; then REPO_NAME='FreeBSD-ports'; fi; printf '%s: { url: \\\"http://pkg.FreeBSD.org/\\${ABI}/%s\\\" }\\n' \\$REPO_NAME \\$REPO_TYPE > /usr/local/etc/pkg/repos/FreeBSD.conf\"",
+  "env ASSUME_ALWAYS_YES=yes pkg bootstrap -f",
+  "pkg update -f",
+  "pkg install -y navidrome",
+  "sh -c \"printf 'Address = \\\"0.0.0.0\\\"\\nPort = 4533\\nDataFolder = \\\"/var/db/navidrome\\\"\\nMusicFolder = \\\"/media/music\\\"\\nLogLevel = \\\"info\\\"\\n' > /usr/local/etc/navidrome.toml\"",
+  "sysrc navidrome_enable=YES",
+  "sysrc navidrome_config=/usr/local/etc/navidrome.toml",
+  "mkdir -p /media/music",
+  "sh -c 'service navidrome start > /var/log/navidrome-start.log 2>&1 &'"
+]
+
+[environment]
+LANG = "en_US.UTF-8"

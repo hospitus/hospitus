@@ -1,0 +1,105 @@
+# hospitus.io/v1 — Debian 12 VM with a passed-through GPU
+#
+# Hands a PCI graphics card to a bhyve guest, so the guest drives it directly
+# and the host cannot. This is the only example that exercises the
+# `passthrough` field.
+#
+# The host has to give the card up first, and that needs a reboot. See
+# README.md next to this file — applying this manifest without those steps
+# fails at VM start, because the card is still bound to its host driver.
+#
+# Quick start, once the host is prepared:
+#   hospitus image fetch cloud:debian-12-amd64
+#   doas hospitus apply --start --var name=gpu template.toml
+#   ssh -p 2220 debian@<host-ip>
+#   lspci -nn | grep -i nvidia          # the card, seen from inside the guest
+
+[workload]
+api_version = "hospitus.io/v1"
+name = "{{ .name | default `gpu` }}"
+
+[workload.labels]
+os = "linux"
+distro = "debian"
+hypervisor = "bhyve"
+passthrough = "gpu"
+
+[workload.annotations]
+description = "Debian 12 VM owning a PCI graphics card"
+ssh_port = "2220"
+
+[provider]
+type = "bhyve"
+
+[image]
+source = "cloud:debian-12-amd64"
+arch = "amd64"
+
+[resources]
+cpu = {{ .cpus | default 4 }}
+memory = "{{ .memory | default `8Gi` }}"
+
+[storage.root_disk]
+size = "{{ .disk_size | default `40Gi` }}"
+type = "zvol"
+
+[[networks]]
+name = "default"
+type = "bridge"
+bridge = "{{ .bridge | default `hospitus0` }}"
+# A fixed MAC keeps the guest's DHCP lease, and any firewall rule keyed to it,
+# stable across recreations.
+mac = "{{ .mac | default `58:9c:fc:00:10:60` }}"
+
+[networks.ip]
+mode = "dhcp"
+
+[[networks.ports]]
+host = {{ .ssh_port | default 2220 }}
+container = 22
+protocol = "tcp"
+
+[lifecycle]
+stop_timeout = 60
+
+[lifecycle.autostart]
+# Off on purpose: the host has no access to the card while this VM runs, so
+# starting it at boot would take the GPU away from the host every time.
+enabled = false
+
+[cloud_init]
+enabled = true
+hostname = "gpu"
+# Record whether the card arrived, before anything tries to drive it. The
+# output lands in /var/log/cloud-init-output.log inside the guest.
+runcmd = [
+    "lspci -nn | grep -i nvidia || echo 'no GPU visible to the guest'",
+]
+
+[[cloud_init.users]]
+name = "debian"
+sudo = "ALL=(ALL) NOPASSWD:ALL"
+shell = "/bin/bash"
+groups = ["sudo"]
+lock_passwd = true
+ssh_authorized_keys = [
+    # "ssh-ed25519 AAAAC3... your-key"
+]
+
+[provider_overrides.bhyve]
+bootloader  = "uefi"
+# Left unset: under UEFI the provider gives disk0 ahci-hd, the only driver
+# OVMF can read.
+
+# The card and its HDMI audio function, in the bus/device/function form bhyve
+# expects. Read them from the host with `pciconf -lv | grep -B1 -i nvidia`: an
+# entry printed as pci0:1:0:0 is written "1/0/0" here.
+#
+# Both functions travel together — they share an IOMMU group, and passing one
+# without the other leaves the guest with a card it cannot use.
+passthrough = [
+    "{{ .gpu_pci | default `1/0/0` }}",
+    "{{ .gpu_audio_pci | default `1/0/1` }}",
+]
+
+# No VNC here: the guest drives a real display through the card it was given.

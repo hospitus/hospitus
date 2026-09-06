@@ -1,0 +1,204 @@
+# QEMU VM Stack - Development Environment
+#
+# A multi-VM development stack using QEMU:
+# - Database VM (PostgreSQL on Debian)
+# - Backend VM (Node.js/Python on Debian)
+# - Frontend VM (Static files on Alpine)
+#
+# This demonstrates QEMU-based orchestration with dependencies.
+#
+# Prerequisites:
+# - QEMU installed: pkg install qemu
+# - Cloud images downloaded
+#
+# Usage:
+#   hospitus apply --start qemu-stack.toml
+#   hospitus manifest delete -y qemu-stack.toml
+
+[stack]
+api_version = "hospitus.io/v1"
+name = "{{ .name | default `qemu-dev-stack` }}"
+
+#
+# Database VM (PostgreSQL)
+# Starts first - no dependencies
+#
+[[instances]]
+name = "db"
+provider = "qemu"
+
+[instances.image]
+source = "cloud:debian-12-amd64"
+
+[instances.resources]
+cpu = 2
+memory = "2Gi"
+
+[instances.storage.root_disk]
+size = "20Gi"
+type = "qcow2"
+
+[[instances.storage.volumes]]
+name = "pgdata"
+size = "50Gi"
+mount_path = "/var/lib/postgresql"
+
+[[instances.networks]]
+name = "internal"
+type = "nat"
+
+[instances.networks.ip]
+mode = "static"
+address = "10.20.0.10/24"
+# A static address carries no route and no resolver of its own. cloud-init
+# writes both into the guest at first boot, which is what makes them work here
+# and not on a jail — see the manifest reference.
+gateway = "10.20.0.1"
+dns = ["1.1.1.1", "8.8.8.8"]
+
+[[instances.networks.ports]]
+host = 5432
+container = 5432
+protocol = "tcp"
+
+[instances.cloud_init]
+enabled = true
+hostname = "db-vm"
+packages = ["postgresql", "postgresql-contrib"]
+runcmd = [
+    "systemctl enable postgresql",
+    "systemctl start postgresql",
+    "sudo -u postgres createuser -s admin || true",
+    "sudo -u postgres createdb appdb || true"
+]
+
+[instances.provider_overrides.qemu]
+machine = "q35"
+# "host" needs an accelerator that can expose the real CPU — KVM on Linux,
+# HVF on macOS. FreeBSD builds QEMU with TCG only, where "host" is not a
+# model qemu-system-x86_64 knows and the VM refuses to start. "max" asks for
+# everything the emulator can offer, on every platform.
+cpu = "max"
+
+#
+# Backend VM (Application Server)
+# Depends on: db-vm
+#
+[[instances]]
+name = "backend"
+provider = "qemu"
+
+[instances.depends_on]
+services = ["db"]
+condition = "started"
+
+[instances.image]
+source = "cloud:debian-12-amd64"
+
+[instances.resources]
+cpu = 4
+memory = "4Gi"
+
+[instances.storage.root_disk]
+size = "30Gi"
+type = "qcow2"
+
+[[instances.storage.volumes]]
+name = "app"
+size = "20Gi"
+mount_path = "/app"
+
+[[instances.networks]]
+name = "internal"
+type = "nat"
+
+[instances.networks.ip]
+mode = "static"
+address = "10.20.0.20/24"
+
+[[instances.networks.ports]]
+host = 3000
+container = 3000
+protocol = "tcp"
+
+[[instances.networks.ports]]
+host = 2202
+container = 22
+protocol = "tcp"
+
+[instances.cloud_init]
+enabled = true
+hostname = "backend-vm"
+packages = ["nodejs", "npm", "python3", "python3-pip", "git"]
+runcmd = [
+    "npm install -g pm2 || true",
+    "echo 'Backend VM ready!' > /etc/motd"
+]
+
+[[instances.cloud_init.users]]
+name = "app"
+sudo = "ALL=(ALL) NOPASSWD:ALL"
+shell = "/bin/bash"
+groups = ["sudo"]
+lock_passwd = true
+
+[instances.provider_overrides.qemu]
+machine = "q35"
+cpu = "max"
+
+#
+# Frontend VM (Static file server)
+# Depends on: backend-vm
+#
+[[instances]]
+name = "frontend"
+provider = "qemu"
+
+[instances.depends_on]
+services = ["backend"]
+condition = "started"
+
+[instances.image]
+source = "cloud:debian-12-amd64"
+
+[instances.resources]
+cpu = 1
+memory = "512Mi"
+
+[instances.storage.root_disk]
+size = "5Gi"
+type = "qcow2"
+
+[[instances.networks]]
+name = "internal"
+type = "nat"
+
+[instances.networks.ip]
+mode = "static"
+address = "10.20.0.30/24"
+
+# Public HTTP access
+[[instances.networks.ports]]
+host = 8088
+container = 80
+protocol = "tcp"
+
+# HTTPS
+[[instances.networks.ports]]
+host = 8443
+container = 443
+protocol = "tcp"
+
+[instances.cloud_init]
+enabled = true
+hostname = "frontend-vm"
+packages = ["nginx", "curl"]
+runcmd = [
+    "systemctl enable nginx",
+    "systemctl start nginx",
+    "echo '<h1>QEMU Stack Frontend</h1>' > /var/www/html/index.html"
+]
+
+[instances.provider_overrides.qemu]
+machine = "q35"
+cpu = "max"

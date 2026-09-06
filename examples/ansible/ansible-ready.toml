@@ -1,0 +1,105 @@
+# Ansible-Ready VM Template
+#
+# A minimal VM prepared for Ansible provisioning.
+# Cloud-init only installs SSH keys and Python - actual configuration
+# is delegated to your existing Ansible playbooks.
+#
+# This demonstrates how to integrate Hospitus with your existing
+# configuration management tools (Ansible, Puppet, Chef, Salt).
+#
+# Prerequisites:
+# - Cloud image: hospitus image fetch cloud:ubuntu-24.04
+# - Ansible installed on your workstation
+#
+# Workflow:
+#   1. hospitus apply --start ansible-ready.toml
+#   2. Wait for VM to boot (~2 minutes)
+#   3. ansible-playbook -i inventory.ini playbook.yml
+#
+# Usage:
+#   cd examples/ansible
+#   hospitus apply --start ansible-ready.toml
+#   ansible-playbook -i inventory.ini site.yml
+
+[workload]
+api_version = "hospitus.io/v1"
+name = "ansible-target"
+
+[workload.labels]
+managed_by = "ansible"
+role = "webserver"
+
+[workload.annotations]
+description = "VM ready for Ansible provisioning"
+ansible_host = "localhost"
+ansible_port = "2270"
+
+[provider]
+type = "bhyve"
+
+[image]
+source = "cloud:ubuntu-24.04"
+arch = "amd64"
+
+[resources]
+cpu = 2
+memory = "2Gi"
+
+[storage.root_disk]
+size = "20Gi"
+type = "zvol"
+
+[[networks]]
+name = "mgmt"
+type = "nat"
+bridge = "hospitus0"
+
+[networks.ip]
+mode = "dhcp"
+
+# SSH for Ansible
+[[networks.ports]]
+host = 2270
+container = 22
+protocol = "tcp"
+
+# HTTP (will be configured by Ansible)
+[[networks.ports]]
+host = 8270
+container = 80
+protocol = "tcp"
+
+# Minimal cloud-init - just enough for Ansible
+[cloud_init]
+enabled = true
+hostname = "ansible-target"
+
+# Only install Python (required by Ansible) and basics
+packages = ["python3", "python3-apt"]
+
+# Minimal runcmd - just ensure Python is ready
+runcmd = [
+    "echo 'VM ready for Ansible provisioning' > /var/log/ansible-ready"
+]
+
+# Your Ansible controller's SSH key
+ssh_authorized_keys = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample... ansible-controller"
+]
+
+[[cloud_init.users]]
+name = "ansible"
+sudo = "ALL=(ALL) NOPASSWD:ALL"
+shell = "/bin/bash"
+groups = ["sudo"]
+lock_passwd = true
+ssh_authorized_keys = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample... ansible-controller"
+]
+
+[lifecycle.autostart]
+enabled = false
+
+[provider_overrides.bhyve]
+bootloader = "uefi"
+console_type = "virtio"

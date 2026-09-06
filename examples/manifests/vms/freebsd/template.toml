@@ -1,0 +1,128 @@
+# hospitus.io/v1 — FreeBSD 14.3 bhyve VM
+#
+# FreeBSD 14.3 VM with nuageinit provisioning (NoCloud cloud-init datasource).
+# Image from mirror.convectix.com has cloud-init/nuageinit pre-installed.
+#
+# Quick start:
+#   hospitus image fetch cloud:freebsd-14.3-RELEASE-amd64-zfs
+#   doas hospitus apply --start --var name=freebsd template.toml
+#   hospitus bhyve vnc freebsd   # login: admin / hospitus
+
+[workload]
+api_version = "hospitus.io/v1"
+name = "{{ .name | default `freebsd-server` }}"
+
+[workload.labels]
+os = "freebsd"
+version = "14.3"
+provisioning = "nuageinit"
+
+[workload.annotations]
+description = "FreeBSD 14.3 server with nuageinit provisioning"
+ssh_port = "2260"
+
+[provider]
+type = "bhyve"
+
+[image]
+source = "cloud:freebsd-14.3-RELEASE-amd64-zfs"
+arch = "{{ .os_arch | default `amd64` }}"
+
+[resources]
+cpu = 4
+memory = "4Gi"
+
+# Root disk
+[storage.root_disk]
+size = "{{ .disk_size | default `20Gi` }}"
+type = "zvol"
+
+[lifecycle]
+stop_timeout = 30
+
+[lifecycle.autostart]
+enabled = true
+priority = 40
+delay = "10s"
+
+# Provisioning hooks: use a provisioning script instead of inline commands.
+# See: examples/manifests/vms/freebsd/provision.sh
+
+[[networks]]
+name = "default"
+type = "bridge"
+bridge = "hospitus0"
+
+[networks.ip]
+mode = "dhcp"
+dns = ["8.8.8.8", "1.1.1.1"]
+
+# SSH access
+[[networks.ports]]
+host = 2260
+container = 22
+protocol = "tcp"
+
+# Cloud-init (nuageinit) provisioning
+# nuageinit supports: users, packages (via pkg), runcmd, ssh_authorized_keys
+[cloud_init]
+enabled = true
+hostname = "freebsd-server"
+
+# user_data_file = "/path/to/user-data.yaml"
+#
+# An alternative to everything below: point at a cloud-config file you maintain
+# yourself and Hospitus ships it verbatim. It replaces the whole inline
+# configuration rather than adding to it, so the two cannot be combined — which
+# is why it stays commented out here.
+
+# FreeBSD packages to install
+packages = ["vim", "git", "curl", "wget", "htop", "tmux", "nginx"]
+
+# Commands to run after boot
+# Note: FreeBSD uses rc.d services, not systemd
+runcmd = [
+    # Enable and start nginx
+    "sysrc nginx_enable=YES",
+    "service nginx start",
+    # Setup basic firewall with PF
+    "echo 'pass in all' > /etc/pf.conf",
+    "sysrc pf_enable=YES",
+    "service pf start",
+    # Create data directory structure
+    "mkdir -p /data/www /data/logs",
+    "chown -R www:www /data/www",
+    # Signal ready
+    "echo 'FreeBSD server ready!' > /var/log/nuageinit-ready"
+]
+
+# SSH keys for root access
+# TODO: Replace with your actual SSH public key(s)
+# Generate with: ssh-keygen -t ed25519 -C "your-email@example.com"
+# Then copy content of ~/.ssh/id_ed25519.pub here
+ssh_authorized_keys = [
+    # "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... your-key"
+]
+
+# Create admin user
+[[cloud_init.users]]
+name = "admin"
+# FreeBSD uses doas instead of sudo; nuageinit supports both.
+# sudo is also supported if the sudo package is installed.
+sudo = "ALL=(ALL) NOPASSWD:ALL"
+doas = "permit nopass %u as root"
+shell = "/bin/sh"
+groups = ["wheel"]
+# Default password for console access. Change or remove after first login.
+plain_text_passwd = "hospitus"
+# Add SSH public key(s) for key-based login (recommended):
+# ssh_authorized_keys = ["ssh-ed25519 AAAA... your-key"]
+
+[provider_overrides.bhyve]
+bootloader = "uefi"
+# VNC access: vncviewer 127.0.0.1:5911 (or: hospitus bhyve vnc freebsd)
+vnc         = "127.0.0.1:5911"
+# The boot disk is read by OVMF, not by the guest kernel, and OVMF has no
+# virtio-blk driver: a VM given one starts, sits in the UEFI shell and never
+# boots. Omitting disk_driver lets the provider pick ahci-hd for disk0 under
+# UEFI, which is what this needs.

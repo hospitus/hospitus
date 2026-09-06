@@ -1,0 +1,62 @@
+# Caddy Container with Podman
+#
+# A containerized web server using Podman, on the official Caddy Alpine image.
+#
+# Caddy rather than NGINX on purpose. Podman on FreeBSD runs a Linux image
+# through the Linux compatibility layer, and NGINX does not survive it on
+# FreeBSD 16-CURRENT: its worker processes exit at startup while the master
+# holds port 80, so the container looks healthy and answers nothing. Caddy and
+# Apache both run there. See "Linux images on FreeBSD" in the Podman guide.
+#
+# Prerequisites:
+# - Podman installed and configured
+#
+# Usage:
+#   hospitus apply --start template.toml
+
+[workload]
+api_version = "hospitus.io/v1"
+name = "{{ .name | default `caddy-container` }}"
+description = "Caddy serving static files from a Podman container"
+
+[workload.labels]
+app = "caddy"
+runtime = "podman"
+image = "caddy:alpine"
+
+[provider]
+type = "podman"
+
+[image]
+source = "oci:caddy:alpine"
+
+# The image already runs this; stating it makes the container's command visible
+# in the manifest, and is where you would change it.
+[provider_overrides.podman]
+command = ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+
+[resources]
+cpu = 1
+memory = "256Mi"
+
+[[networks]]
+name = "web"
+type = "nat"
+
+[[networks.ports]]
+host = 8081
+container = 80
+protocol = "tcp"
+
+[lifecycle]
+stop_timeout = 10
+
+[lifecycle.health_check]
+# wget comes from BusyBox in the alpine image; curl and fetch do not exist
+# there. Asking the server for a page is what tells a running container apart
+# from one whose server never came up — which is exactly how NGINX fails here.
+command = ["wget", "-T", "5", "-q", "-O", "/dev/null", "http://127.0.0.1:80"]
+interval = "30s"
+timeout = "10s"
+retries = 3
+start_period = "10s"
