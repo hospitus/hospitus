@@ -1,0 +1,43 @@
+package qemu
+
+import (
+	"fmt"
+
+	"github.com/spf13/cobra"
+
+	"github.com/hospitus/hospitus/cmd/hospitus-cli/internal/cmdutil"
+)
+
+func newInfoCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "info <name>",
+		Aliases: []string{"get", "show"},
+		Short:   "Show detailed information about a QEMU VM",
+		Args:    cobra.ExactArgs(1),
+		RunE:    runInfo,
+	}
+
+	cmdutil.AddOutputFlag(cmd)
+	return cmd
+}
+
+func runInfo(cmd *cobra.Command, args []string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx := cmd.Context()
+	name := args[0]
+
+	instance, err := cmdutil.APIClient.GetInstance(ctx, name)
+	if err != nil {
+		return fmt.Errorf("failed to get VM info: %w", err)
+	}
+
+	if instance.Provider != "qemu" {
+		return fmt.Errorf("%s is not a QEMU VM (provider: %s)", name, instance.Provider)
+	}
+
+	return cmdutil.PrintInstance(cmd.OutOrStdout(), instance, format)
+}
