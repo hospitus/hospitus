@@ -1,0 +1,153 @@
+#!/bin/sh
+#
+# PROVIDE: hospitus
+# REQUIRE: LOGIN NETWORKING zfs pf
+# KEYWORD: shutdown
+#
+# (Add dnsmasq to REQUIRE as well if you use the bhyve NAT networking mode.)
+#
+# Add the following lines to /etc/rc.conf to enable hospitusd:
+#
+#   hospitus_enable="YES"
+#   hospitus_flags="--allow-insecure-tls"  # REPLACES the default flags below.
+#                                  # The default is "--allow-insecure-tls" because
+#                                  # hospitusd refuses to start without TLS otherwise and
+#                                  # the default hospitus_addr is loopback-only. Setting
+#                                  # hospitus_flags overrides this default entirely — when
+#                                  # exposing hospitus, use "--tls-cert ... --tls-key ...".
+#   hospitus_user=""                  # empty = run as root directly (default; needed for
+#                                  # jail/bhyve management). Set a name only to drop privs.
+#   hospitus_data_dir="/var/lib/hospitus"
+#   hospitus_state_dir="/var/lib/hospitus/state"
+#   hospitus_db="/var/lib/hospitus/hospitus.db"
+#   hospitus_addr="127.0.0.1:8080"    # SAFE DEFAULT: loopback only.
+#                                  # Set to 0.0.0.0:8080 to expose remotely
+#                                  # (requires TLS — see hospitus_flags).
+#   hospitus_log_dir="/var/log/hospitus"
+#   hospitus_key_file="/usr/local/etc/hospitus/api.key"
+#
+# Typical minimal setup:
+#   hospitus_enable="YES"
+#
+# On first start, if hospitus_key_file does not exist, a random API key is
+# generated and stored there (mode 0600). Read it with:
+#   cat /usr/local/etc/hospitus/api.key
+
+. /etc/rc.subr
+
+name="hospitus"
+rcvar="${name}_enable"
+
+load_rc_config "${name}"
+
+: "${hospitus_enable:=NO}"
+: "${hospitus_user:=}"
+: "${hospitus_data_dir:=/var/lib/hospitus}"
+: "${hospitus_state_dir:=/var/lib/hospitus/state}"
+: "${hospitus_db:=/var/lib/hospitus/hospitus.db}"
+: "${hospitus_addr:=127.0.0.1:8080}"
+: "${hospitus_log_dir:=/var/log/hospitus}"
+: "${hospitus_localbase:=$(sysctl -n user.localbase 2>/dev/null || echo /usr/local)}"
+: "${hospitus_key_file:=${hospitus_localbase}/etc/hospitus/api.key}"
+: "${hospitus_flags:=--allow-insecure-tls}"
+
+# hospitusd shells out to tools installed by ports — qemu-system-*, qemu-img,
+# podman, dnsmasq, swtpm — which live under LOCALBASE. rc(8) starts services
+# with a base-only PATH, so without this the QEMU and Podman providers report
+# themselves unavailable on a host where their binaries are installed.
+: "${hospitus_env:=PATH=/sbin:/bin:/usr/sbin:/usr/bin:${hospitus_localbase}/sbin:${hospitus_localbase}/bin}"
+
+pidfile="/var/run/${name}.pid"
+hospitusd="${hospitus_localbase}/bin/hospitusd"
+logfile="${hospitus_log_dir}/hospitusd.log"
+
+# hospitusd runs in the foreground; daemon(8) backgrounds it and manages the pidfile.
+# rc.subr expands "${command} ${rc_flags} ${command_args}" and, inside
+# run_rc_command, always recomputes rc_flags from ${name}_flags. ${command} here
+# is daemon(8), not hospitusd, so those flags would be handed to daemon(8), which
+# exits with a usage error on the first one it does not recognise. Keep the
+# documented hospitus_flags name for operators, copy it into a private variable
+# passed to hospitusd inside command_args, and unset the name rc.subr reads.
+_hospitusd_flags="${hospitus_flags}"
+unset hospitus_flags
+
+# rc.subr matches $pidfile against $procname, which defaults to $command. Here
+# $command is daemon(8) while the pidfile holds the supervised hospitusd pid, so
+# without this both "service hospitus status" and "service hospitus stop" would fail
+# to recognise a running daemon.
+procname="${hospitusd}"
+
+# daemon(8) drops to hospitus_user for the child while keeping the pidfile and
+# the log it opened as root. Without -u the variable only changed who owned the
+# directories, and the daemon still ran as root.
+_hospitus_asuser=""
+if [ -n "${hospitus_user}" ]; then
+	_hospitus_asuser="-u ${hospitus_user}"
+fi
+
+command="/usr/sbin/daemon"
+command_args="-f ${_hospitus_asuser} -p ${pidfile} -o ${logfile} -- \
+${hospitusd} \
+--addr ${hospitus_addr} \
+--data-dir ${hospitus_data_dir} \
+--state-dir ${hospitus_state_dir} \
+--db ${hospitus_db} \
+--api-key-file ${hospitus_key_file} \
+--audit-log ${hospitus_log_dir}/audit.log \
+${_hospitusd_flags}"
+
+start_precmd="${name}_prestart"
+stop_postcmd="${name}_poststop"
+
+hospitus_prestart()
+{
+	_owner=""
+	if [ -n "${hospitus_user}" ]; then
+		_owner="-o ${hospitus_user} -g $(id -gn "${hospitus_user}")"
+	fi
+	for dir in "${hospitus_data_dir}" "${hospitus_state_dir}" "${hospitus_log_dir}"; do
+		if [ ! -d "${dir}" ]; then
+			# shellcheck disable=SC2086
+			install -d -m 0750 ${_owner} "${dir}"
+		fi
+	done
+	# Lets hospitus-purge.sh recognise this directory as ours even when it is
+	# otherwise empty; without it the purge refuses a fresh install.
+	if [ ! -e "${hospitus_data_dir}/.hospitus-data-dir" ]; then
+		: > "${hospitus_data_dir}/.hospitus-data-dir"
+	fi
+
+	# Generate an API key on first start so the daemon is not started
+	# fail-closed (rejecting every request) with no usable credential.
+	if [ ! -f "${hospitus_key_file}" ]; then
+		# shellcheck disable=SC2086
+		install -d -m 0750 ${_owner} "$(dirname "${hospitus_key_file}")"
+		# 32 random bytes, hex-encoded, via the base system (no openssl dep).
+		# Capture into a variable first: a piped redirection reports the exit
+		# status of the last stage only, so a failed jot would still leave an
+		# empty file and the `||` fallback would never run.
+		_key=$(jot -r -w '%02x' 32 0 255 2>/dev/null | tr -d '\n')
+		if [ -z "${_key}" ]; then
+			_key=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+		fi
+		if [ -z "${_key}" ]; then
+			warn "hospitus: failed to generate an API key; not creating ${hospitus_key_file}"
+			return 1
+		fi
+		( umask 077; printf '%s\n' "${_key}" > "${hospitus_key_file}" )
+		chmod 0600 "${hospitus_key_file}"
+		# The daemon reads this file as hospitus_user; created by root it would
+		# be unreadable to it, and the daemon would start with no credential.
+		if [ -n "${hospitus_user}" ]; then
+			chown "${hospitus_user}:$(id -gn "${hospitus_user}")" "${hospitus_key_file}"
+		fi
+		echo "hospitus: generated API key at ${hospitus_key_file}"
+	fi
+}
+
+hospitus_poststop()
+{
+	rm -f "${pidfile}"
+}
+
+run_rc_command "$1"
