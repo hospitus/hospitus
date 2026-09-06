@@ -1,0 +1,34 @@
+# Test manifest for hooks
+[workload]
+api_version = "hospitus.io/v1"
+name = "test-hooks"
+
+[provider]
+type = "jail"
+
+[image]
+source = "freebsd:14.3-RELEASE"
+arch = "amd64"
+
+[resources]
+cpu = 1
+memory = "512Mi"
+
+[[networks]]
+name = "default"
+type = "bridge"
+bridge = "hospitus0"
+
+[networks.ip]
+mode = "dhcp"
+
+# Simple post-create hooks to test
+[[lifecycle.hooks.post_create]]
+type = "exec"
+commands = [
+    "echo 'Hook test: Hello from inside the jail!'",
+    "date",
+    "uname -a",
+    "env ASSUME_ALWAYS_YES=yes pkg bootstrap",
+    "pkg info | head -5"
+]
