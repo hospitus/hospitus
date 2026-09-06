@@ -395,3 +395,75 @@ func TestGetPermissionsValidKeyNoPermissions(t *testing.T) {
 		t.Error("unknown key must report exists=false")
 	}
 }
+
+// TestAuthenticateIdentityIsNotDerivedFromTheKey covers what the audit log and
+// the usage metrics record for a caller.
+//
+// They used to record an unsalted 64-bit digest of the key itself. A reader of
+// those outputs could test guesses against it offline, which matters most
+// exactly where the keys are weakest: SimpleAuthProvider's keys are the
+// plaintext strings someone put in a config file.
+func TestAuthenticateIdentityIsNotDerivedFromTheKey(t *testing.T) {
+	t.Run("a configured key is named by its position", func(t *testing.T) {
+		sap := NewSimpleAuthProvider([]string{"first-key", "second-key"})
+
+		_, first, ok := sap.Authenticate("first-key")
+		if !ok {
+			t.Fatal("the first key should authenticate")
+		}
+		_, second, ok := sap.Authenticate("second-key")
+		if !ok {
+			t.Fatal("the second key should authenticate")
+		}
+
+		// The exact values: "they differ" would also hold for two digests of
+		// the keys, which is the thing this exists to rule out.
+		if first != "config-key-1" || second != "config-key-2" {
+			t.Errorf("identities = %q, %q; want config-key-1, config-key-2", first, second)
+		}
+		for _, id := range []string{first, second} {
+			if strings.Contains(id, "first-key") || strings.Contains(id, "second-key") {
+				t.Errorf("identity %q carries the key itself", id)
+			}
+		}
+
+		// Stable across restarts, so an audit entry still names the same key.
+		again := NewSimpleAuthProvider([]string{"first-key", "second-key"})
+		if _, id, _ := again.Authenticate("first-key"); id != first {
+			t.Errorf("identity changed across a restart: %q then %q", first, id)
+		}
+	})
+
+	t.Run("an unknown key has no identity", func(t *testing.T) {
+		sap := NewSimpleAuthProvider([]string{"good"})
+		perms, id, ok := sap.Authenticate("bad")
+		if ok || id != "" || perms != nil {
+			t.Errorf("Authenticate(bad) = %v, %q, %v; want nil, \"\", false", perms, id, ok)
+		}
+	})
+
+	t.Run("a managed key is named by its own ID", func(t *testing.T) {
+		am := NewAuthManager()
+		key, err := GenerateAPIKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := am.AddAPIKey("key-under-test", "audit", key, []string{"read"}, nil); err != nil {
+			t.Fatal(err)
+		}
+
+		perms, id, ok := am.Authenticate(key)
+		if !ok {
+			t.Fatal("the key should authenticate")
+		}
+		if id != "key-under-test" {
+			t.Errorf("identity = %q, want the key's own ID", id)
+		}
+		if strings.Contains(id, key) {
+			t.Error("identity carries the key itself")
+		}
+		if len(perms) != 1 || perms[0] != "read" {
+			t.Errorf("permissions = %v, want [read]", perms)
+		}
+	})
+}

@@ -30,10 +30,22 @@ type AuthProvider interface {
 	// Returns true if the key is valid, false otherwise.
 	ValidateKey(key string) bool
 
-	// GetPermissions returns the permissions associated with an API key and
-	// whether the key exists. The boolean distinguishes a valid key that has
-	// no permissions (nil, true) from an unknown/invalid key (nil, false).
-	GetPermissions(key string) ([]string, bool)
+	// Authenticate verifies a key and reports what it may do together with the
+	// opaque identifier that names it.
+	//
+	// One call, because verification is deliberately expensive: AuthManager
+	// compares with bcrypt, and asking for the permissions and the identifier
+	// separately would pay for it twice.
+	//
+	// The identifier is what the audit log and the usage metrics record. It is
+	// never derived from the key: a digest of the key, however truncated, lets
+	// whoever reads those outputs test guesses against it offline. It is
+	// stable across restarts and is the same string the key is listed under,
+	// so an operator can tell which key an audit entry names.
+	//
+	// ok distinguishes a valid key that holds no permissions (nil, id, true)
+	// from an unknown one ("", "", false).
+	Authenticate(key string) (permissions []string, id string, ok bool)
 }
 
 // APIKey represents an API key with metadata
@@ -286,11 +298,19 @@ func (am *AuthManager) ValidateKey(key string) bool {
 // The second return value reports whether the key exists, so a valid key with
 // no permissions (nil, true) is distinguishable from an invalid key (nil, false).
 func (am *AuthManager) GetPermissions(key string) ([]string, bool) {
+	perms, _, ok := am.Authenticate(key)
+	return perms, ok
+}
+
+// Authenticate implements AuthProvider. The identifier is the key's own ID —
+// the one ListAPIKeys reports — so nothing derived from the key itself reaches
+// the audit log.
+func (am *AuthManager) Authenticate(key string) (permissions []string, id string, ok bool) {
 	apiKey, err := am.ValidateAPIKey(key)
 	if err != nil {
-		return nil, false
+		return nil, "", false
 	}
-	return apiKey.Permissions, true
+	return apiKey.Permissions, apiKey.ID, true
 }
 
 // SimpleAuthProvider provides simple API key authentication for development only.
@@ -298,24 +318,38 @@ func (am *AuthManager) GetPermissions(key string) ([]string, bool) {
 // WARNING: Keys are stored in plaintext in memory. Use only for development
 // or testing. In production, use AuthManager with bcrypt-hashed keys.
 type SimpleAuthProvider struct {
-	validKeys map[string]bool
+	// validKeys maps a key to the opaque identifier it is known by. The
+	// identifier names the key's position in the configured list rather than
+	// anything about the key itself: a configured key is chosen by whoever
+	// wrote the file and may be weak, so a digest of it in the audit log would
+	// be something to test guesses against.
+	validKeys map[string]string
 	mu        sync.RWMutex
+	next      int
 }
 
 // NewSimpleAuthProvider creates a simple auth provider
 func NewSimpleAuthProvider(keys []string) *SimpleAuthProvider {
-	validKeys := make(map[string]bool)
+	validKeys := make(map[string]string)
+	next := 0
 	for _, key := range keys {
 		// A blank line in the key file arrives here as an empty string, and an
 		// empty entry would authenticate a request that carries no key at all.
 		if key == "" {
 			continue
 		}
-		validKeys[key] = true
+		if _, seen := validKeys[key]; seen {
+			continue
+		}
+		next++
+		// Numbered in the order they were configured, so the identifier is the
+		// same across restarts and an operator can match it to their list.
+		validKeys[key] = fmt.Sprintf("config-key-%d", next)
 	}
 
 	return &SimpleAuthProvider{
 		validKeys: validKeys,
+		next:      next,
 	}
 }
 
@@ -341,17 +375,37 @@ func (sap *SimpleAuthProvider) ValidateKey(key string) bool {
 
 // GetPermissions implements AuthProvider for SimpleAuthProvider.
 func (sap *SimpleAuthProvider) GetPermissions(key string) ([]string, bool) {
-	if sap.ValidateKey(key) {
-		return []string{"*"}, true
+	perms, _, ok := sap.Authenticate(key)
+	return perms, ok
+}
+
+// Authenticate implements AuthProvider.
+func (sap *SimpleAuthProvider) Authenticate(key string) (permissions []string, id string, ok bool) {
+	sap.mu.RLock()
+	defer sap.mu.RUnlock()
+
+	id, ok = sap.validKeys[key]
+	if !ok {
+		return nil, "", false
 	}
-	return nil, false
+	return []string{"*"}, id, true
 }
 
 // AddKey adds a new valid key
 func (sap *SimpleAuthProvider) AddKey(key string) {
+	// The constructor already skips these; a direct caller could otherwise
+	// register one, and Authenticate("") would then answer yes where
+	// ValidateKey("") answers no.
+	if key == "" {
+		return
+	}
 	sap.mu.Lock()
 	defer sap.mu.Unlock()
-	sap.validKeys[key] = true
+	if _, seen := sap.validKeys[key]; seen {
+		return
+	}
+	sap.next++
+	sap.validKeys[key] = fmt.Sprintf("config-key-%d", sap.next)
 }
 
 // RemoveKey removes a key
