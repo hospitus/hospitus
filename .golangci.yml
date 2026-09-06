@@ -1,0 +1,100 @@
+version: "2"
+run:
+  modules-download-mode: readonly
+linters:
+  enable:
+    - bodyclose
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - revive
+    - unconvert
+    - whitespace
+  disable:
+    - dupl
+    - gochecknoinits
+    - goconst
+  settings:
+    gocritic:
+      disabled-checks:
+        - whyNoLint
+        - hugeParam
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: unused-parameter
+          disabled: true
+    staticcheck:
+      checks:
+        - all
+        - -SA1019
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - gocritic
+          - gosec
+        path: _test\.go
+      # G204: running external tools — jail, bhyve, qemu, zfs, pfctl,
+      # ifconfig — with dynamic but validated arguments is what this program
+      # does. Every instance name that reaches one has been through
+      # validation.ValidateInstanceName.
+      - linters:
+          - gosec
+        text: G204
+
+      # G702/G703: taint analysis that does not see the guards. Every current
+      # site is one of: a literal path (devfs.go writes "/etc/devfs.rules"), a
+      # constant filename joined to a directory the daemon owns, an identifier
+      # already matched against ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$ — which admits
+      # no separator, no dot and no leading dash — or a path resolved through
+      # FileSecretStore.path, which rejects separators and then checks
+      # containment under baseDir. Re-justify per site before adding one.
+      - linters:
+          - gosec
+        text: G70[23]
+
+      # G202: the only thing concatenated into the IN clause is a run of "?"
+      # placeholders; the values themselves are bound as parameters.
+      - linters:
+          - gosec
+        text: G202
+      - path: cmd/
+        text: use of `fmt.Println`
+      - linters:
+          - govet
+        text: 'shadow: declaration of "err"'
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 10
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/hospitus/hospitus
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
