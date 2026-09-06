@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -35,6 +36,18 @@ func (p *VFKitProvider) CreateInstance(ctx context.Context, spec provider.Instan
 
 	// Only a genuine absence may continue. A stat that failed on I/O or on
 	// permissions says nothing about whether the VM is there, and treating it
+	// Before anything is written: the framework runs guest instructions on the
+	// host CPU with no emulation fallback, so a foreign architecture cannot
+	// boot here at all. Refused only by the CLI until now, which asked its own
+	// runtime.GOARCH — the wrong machine whenever the daemon is elsewhere, and
+	// the VM directory, disk and config were all created before the failure
+	// showed up at start time.
+	if spec.Arch != "" && spec.Arch != "native" && spec.Arch != runtime.GOARCH {
+		return provider.InstanceHandle{}, fmt.Errorf(
+			"vfkit runs guest instructions on the host CPU: %s cannot boot on %s",
+			spec.Arch, runtime.GOARCH)
+	}
+
 	// as absent lets prepareDisk truncate an existing disk and cleanup remove
 	// the directory it lives in.
 	if _, statErr := os.Stat(p.configPath(spec.Name)); statErr == nil {

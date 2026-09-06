@@ -246,6 +246,15 @@ func CheckInstanceList(instances []*datastore.Instance) error {
 	return nil
 }
 
+// DaemonIsLocal reports whether the daemon runs on this machine.
+//
+// For the few checks that can only speak for the host they run on — a CPU
+// architecture, say. Against a remote daemon such a check describes the wrong
+// machine and has to be left to the daemon itself.
+func DaemonIsLocal() bool {
+	return daemonIsLocal
+}
+
 // DaemonPath prepares a filesystem path for an API call that opens it on the
 // daemon's host.
 //

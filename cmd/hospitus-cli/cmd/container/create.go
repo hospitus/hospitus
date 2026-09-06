@@ -1,0 +1,106 @@
+package container
+
+import (
+	"fmt"
+
+	"github.com/spf13/cobra"
+
+	"github.com/hospitus/hospitus/cmd/hospitus-cli/internal/cmdutil"
+	"github.com/hospitus/hospitus/internal/client"
+	"github.com/hospitus/hospitus/pkg/provider"
+)
+
+func newCreateCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create a new container",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runCreate,
+	}
+
+	// Declare only what this provider honors. The shared create-flag helpers
+	// offer the full jail/bhyve vocabulary — disks, VNET, bridges, IOPS limits,
+	// a bootloader — none of which reaches the framework, and a flag that is
+	// accepted and silently dropped is worse than one that is absent.
+	cmd.Flags().IntP(cmdutil.FlagCPUs, "c", 1, "Number of CPUs")
+	cmd.Flags().Int64P(cmdutil.FlagMemory, "m", 512, "Memory in MB")
+	cmd.Flags().String(cmdutil.FlagImage, "", "Base image")
+	cmd.Flags().String(cmdutil.FlagArch, "native", "Architecture (native, amd64, arm64)")
+	cmd.Flags().String(cmdutil.FlagOSType, "", "OS type (freebsd, linux, windows)")
+	cmd.Flags().String(cmdutil.FlagOSVersion, "", "OS version")
+	cmd.Flags().String(cmdutil.FlagDescription, "", "Instance description")
+	cmd.Flags().Bool(cmdutil.FlagStart, false, "Start the container once it is created")
+	// Named and shaped as 'hospitus podman create --cmd' is: the provider reads
+	// the same "command" key from either, and nothing here could send it.
+	cmd.Flags().StringArray("cmd", nil, "Override container command (repeatable args)")
+
+	return cmd
+}
+
+func runCreate(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	name := args[0]
+
+	cpus, _ := cmd.Flags().GetInt(cmdutil.FlagCPUs)
+	memory, _ := cmd.Flags().GetInt64(cmdutil.FlagMemory)
+	if err := cmdutil.ValidateCPUs(cpus); err != nil {
+		return err
+	}
+	if err := cmdutil.ValidateMemory(memory); err != nil {
+		return err
+	}
+
+	image, _ := cmd.Flags().GetString(cmdutil.FlagImage)
+	osType, _ := cmd.Flags().GetString(cmdutil.FlagOSType)
+	osVersion, _ := cmd.Flags().GetString(cmdutil.FlagOSVersion)
+	description, _ := cmd.Flags().GetString(cmdutil.FlagDescription)
+	autoStart, _ := cmd.Flags().GetBool(cmdutil.FlagStart)
+
+	arch, _ := cmd.Flags().GetString(cmdutil.FlagArch)
+	cmdArgs, _ := cmd.Flags().GetStringArray("cmd")
+
+	// applecontainer's commandArgs reads this key and accepts either
+	// []interface{} or []string; podman sends the former, so this does too.
+	providerConfig := map[string]interface{}{}
+	if len(cmdArgs) > 0 {
+		cmdIfaces := make([]interface{}, len(cmdArgs))
+		for i, a := range cmdArgs {
+			cmdIfaces[i] = a
+		}
+		providerConfig["command"] = cmdIfaces
+	}
+
+	spec := provider.InstanceSpec{
+		Name:           name,
+		Description:    description,
+		CPUs:           cpus,
+		MemoryMB:       memory,
+		Image:          image,
+		OSType:         osType,
+		OSVersion:      osVersion,
+		Arch:           arch,
+		Labels:         make(map[string]string),
+		Annotations:    make(map[string]string),
+		ProviderConfig: providerConfig,
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Creating container %s...\n", name)
+	instance, err := cmdutil.APIClient.CreateInstance(ctx, client.CreateInstanceRequest{
+		Provider: providerName,
+		Spec:     spec,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create container: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Container created: %s (ID: %s)\n", instance.Name, instance.ID)
+
+	if autoStart {
+		if err := cmdutil.APIClient.StartInstance(ctx, instance.ID, cmd.OutOrStdout()); err != nil {
+			return fmt.Errorf("container created but failed to start: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Container started: %s\n", name)
+	}
+
+	return nil
+}
