@@ -1,6 +1,7 @@
 package qemu
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -70,7 +71,7 @@ func TestBuildCloneConfigGivesTheCloneItsOwnPorts(t *testing.T) {
 		},
 	}
 
-	clone, err := p.buildCloneConfig(source, "web-copy", "/vms/web-copy", "/vms/web-copy/disk0.qcow2", provider.CloneOptions{})
+	clone, err := p.buildCloneConfig(source, filepath.Join(p.dataDir, "web"), "web-copy", "/vms/web-copy", "/vms/web-copy/disk0.qcow2", provider.CloneOptions{})
 	if err != nil {
 		t.Fatalf("buildCloneConfig: %v", err)
 	}
@@ -88,5 +89,54 @@ func TestBuildCloneConfigGivesTheCloneItsOwnPorts(t *testing.T) {
 	}
 	if strings.Contains(joined, "-vnc :0") {
 		t.Errorf("the clone kept the source's VNC display: %q", joined)
+	}
+}
+
+// The disk paths a clone records. Rewritten three times over one review, each
+// time getting one case right and another wrong: only disk0, then every disk
+// including ones the rewrite cannot reach, then a copy that never happened.
+func TestBuildCloneConfigRewritesEveryDiskPath(t *testing.T) {
+	p := NewQEMUProvider()
+	p.dataDir = "/vms"
+
+	source := &vmConfig{
+		Name: "web",
+		Args: []string{"-name", "web"},
+		Spec: provider.InstanceSpec{
+			Name: "web",
+			Disks: []provider.DiskSpec{
+				{Path: "/vms/web/disk0.qcow2"},
+				{Path: "/vms/web/data/disk1.qcow2"},
+				{Path: "/srv/images/shared.qcow2"},
+			},
+		},
+	}
+
+	clone, err := p.buildCloneConfig(source, "/vms/web", "web-copy", "/vms/web-copy",
+		"/vms/web-copy/disk0.qcow2", provider.CloneOptions{})
+	if err != nil {
+		t.Fatalf("buildCloneConfig: %v", err)
+	}
+
+	want := []string{
+		"/vms/web-copy/disk0.qcow2",
+		"/vms/web-copy/data/disk1.qcow2",
+		// Outside the source directory: a shared image the clone keeps
+		// referencing rather than a file it owns.
+		"/srv/images/shared.qcow2",
+	}
+	if len(clone.Spec.Disks) != len(want) {
+		t.Fatalf("clone has %d disks, want %d", len(clone.Spec.Disks), len(want))
+	}
+	for i, w := range want {
+		if clone.Spec.Disks[i].Path != w {
+			t.Errorf("disk %d = %q, want %q", i, clone.Spec.Disks[i].Path, w)
+		}
+	}
+
+	// The source spec is the caller's; rewriting it in place would move the
+	// original VM's disks out from under it.
+	if source.Spec.Disks[1].Path != "/vms/web/data/disk1.qcow2" {
+		t.Errorf("buildCloneConfig mutated the source spec: %q", source.Spec.Disks[1].Path)
 	}
 }
