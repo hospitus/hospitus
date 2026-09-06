@@ -11,6 +11,13 @@ import (
 	"github.com/hospitus/hospitus/pkg/job"
 )
 
+// ErrJobRowNotFound marks a job row that is not there.
+//
+// A caller has to tell "there was nothing to delete" — which is fine, the row
+// may predate a restart or never have been written — from a datastore that
+// could not do the work, which is not.
+var ErrJobRowNotFound = errors.New("job row not found")
+
 // CreateJob inserts a new job record into the database.
 func (ds *Datastore) CreateJob(ctx context.Context, j *job.Job) error {
 	// Read a consistent, lock-free snapshot of the job's fields. A submitted job
@@ -263,7 +270,7 @@ func (ds *Datastore) DeleteJob(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to check job delete result: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("job %s not found", id)
+		return fmt.Errorf("%w: %s", ErrJobRowNotFound, id)
 	}
 
 	return nil
