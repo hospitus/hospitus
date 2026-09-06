@@ -128,7 +128,14 @@ func TestUpdateInstanceDescription(t *testing.T) {
 	}
 }
 
-func TestUpdateInstanceProviderConfig(t *testing.T) {
+// TestUpdateInstanceProviderConfigUnsupported covers a provider_config change
+// aimed at a provider that cannot apply one.
+//
+// This asserted 200 and a stored custom_key: the handler wrote the change to
+// the datastore and reported success, while mockProvider — like every provider
+// but jail — implements no ReconfigureProvider and never saw it. Nothing reads
+// handle metadata back as configuration, so the change went nowhere.
+func TestUpdateInstanceProviderConfigUnsupported(t *testing.T) {
 	s, ds := setupTestServer(t)
 	defer ds.Close()
 
@@ -150,16 +157,17 @@ func TestUpdateInstanceProviderConfig(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.mux.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d body=%s", w.Code, w.Body.String())
 	}
 
+	// And nothing was written: the refusal comes before the datastore.
 	stored, err := ds.GetInstance(ctx, inst.ID)
 	if err != nil {
 		t.Fatalf("GetInstance: %v", err)
 	}
-	if got := stored.Handle.Metadata["custom_key"]; got != "custom_value" {
-		t.Errorf("provider_config custom_key = %v, want custom_value", got)
+	if got, ok := stored.Handle.Metadata["custom_key"]; ok {
+		t.Errorf("provider_config custom_key = %v, want it never stored", got)
 	}
 }
 
