@@ -11,15 +11,10 @@ import (
 	"github.com/hospitus/hospitus/pkg/validation"
 )
 
-// VNETConfig represents VNET configuration for a jail.
-type VNETConfig struct {
-	Enabled      bool     `json:"enabled"`       // Enable VNET
-	Interfaces   []string `json:"interfaces"`    // Network interfaces to add to jail
-	Bridge       string   `json:"bridge"`        // Bridge to attach epair to
-	IPv4Address  string   `json:"ipv4_address"`  // IPv4 address for jail interface
-	IPv6Address  string   `json:"ipv6_address"`  // IPv6 address for jail interface
-	DefaultRoute string   `json:"default_route"` // Default gateway
-}
+// VNETConfig is an alias: the type moved to pkg/provider so the API can reach
+// VNET through the VNETProvider interface instead of the concrete
+// *JailProvider.
+type VNETConfig = provider.VNETConfig
 
 // EnableVNET enables VNET (virtual network stack) for a jail.
 //

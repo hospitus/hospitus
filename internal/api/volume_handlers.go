@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hospitus/hospitus/pkg/provider"
 	"github.com/hospitus/hospitus/pkg/provider/jail"
 	"github.com/hospitus/hospitus/pkg/storage"
 	"github.com/hospitus/hospitus/pkg/validation"
@@ -243,11 +244,15 @@ func (s *Server) handleInstanceVolumes(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 
-	jailProv, ok := prov.(*jail.JailProvider)
+	// The capability interface, not *jail.JailProvider: the concrete type meant
+	// anything wrapping a jail provider — a decorator, a test double — was told
+	// 501 for volume operations it implements. handleFreeBSD reaches rctl and
+	// VNET the same way.
+	jailProv, ok := prov.(provider.NamedVolumeProvider)
 	if !ok {
 		// The provider does not offer this, which is not a server fault: 500
 		// told the caller to retry something that will never work.
-		s.writeError(w, http.StatusNotImplemented, "Invalid jail provider")
+		s.writeError(w, http.StatusNotImplemented, "Provider does not support named volumes")
 		return
 	}
 

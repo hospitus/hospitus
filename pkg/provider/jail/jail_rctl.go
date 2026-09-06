@@ -3,9 +3,9 @@ package jail
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/hospitus/hospitus/pkg/logging"
 	"github.com/hospitus/hospitus/pkg/provider"
@@ -20,12 +20,10 @@ import (
 //
 // Note: RCTL requires kern.racct.enable=1 in /boot/loader.conf
 
-// ResourceLimit represents a FreeBSD rctl resource limit rule.
-type ResourceLimit struct {
-	Resource string `json:"resource"` // e.g., "memoryuse", "cputime", "maxproc"
-	Action   string `json:"action"`   // e.g., "deny", "log", "devctl"
-	Amount   string `json:"amount"`   // e.g., "2G", "3600", "100"
-}
+// ResourceLimit is an alias: the type moved to pkg/provider so the API can
+// reach rctl through the RctlProvider interface instead of the concrete
+// *JailProvider.
+type ResourceLimit = provider.ResourceLimit
 
 // applyRCTLLimits applies resource limits to a jail using RCTL.
 // This is called during jail startup to apply CPU and memory limits.
@@ -115,6 +113,10 @@ func (p *JailProvider) applyRCTLLimits(ctx context.Context, name string, resourc
 	return nil
 }
 
+// rctlAmountPattern is the whole grammar an rctl amount may use: a number,
+// optionally fractional, with at most one unit letter and an optional percent.
+var rctlAmountPattern = regexp.MustCompile(`^\d+(\.\d+)?[a-zA-Z]?%?$`)
+
 // SetResourceLimits sets resource limits on a jail using FreeBSD rctl.
 //
 // FreeBSD rctl allows fine-grained resource control for jails.
@@ -166,17 +168,17 @@ func (p *JailProvider) SetResourceLimits(ctx context.Context, handle provider.In
 			return fmt.Errorf("invalid action: %s", limit.Action)
 		}
 
-		// SECURITY: Validate amount to prevent rule injection.
-		// RCTL amounts are numeric with optional suffix (G, M, K, %).
-		// Reject newlines, null bytes, or shell metacharacters.
-		if !utf8.ValidString(limit.Amount) {
-			return fmt.Errorf("invalid amount: must be valid UTF-8")
-		}
-		if strings.ContainsAny(limit.Amount, "\x00\r\n;&|$`(){}[]<>\\\"'") {
-			return fmt.Errorf("invalid amount: contains invalid characters")
-		}
+		// SECURITY: the amount is interpolated into a colon-separated,
+		// equals-terminated rule grammar, so what it may contain is spelled
+		// out rather than what it may not. The old blacklist named shell
+		// metacharacters — which rctl never sees, there being no shell — and
+		// let ":" and "=" through: "2G:pcpu:deny=100" defined a second rule
+		// nobody asked for.
 		if len(limit.Amount) > 20 {
 			return fmt.Errorf("invalid amount: too long (max 20 characters)")
+		}
+		if !rctlAmountPattern.MatchString(limit.Amount) {
+			return fmt.Errorf("invalid amount %q: expected a number with an optional unit suffix, e.g. 2G, 3600 or 50%%", limit.Amount)
 		}
 
 		// Build rctl rule: jail:jailname:resource:action=amount
@@ -438,3 +440,11 @@ func (p *JailProvider) GetCPUPriority(ctx context.Context, handle provider.Insta
 
 	return nice, nil
 }
+
+// The API reaches rctl and VNET through these interfaces, not through
+// *JailProvider. Asserted here so a signature change breaks the build rather
+// than turning a live endpoint into 501.
+var (
+	_ provider.RctlProvider = (*JailProvider)(nil)
+	_ provider.VNETProvider = (*JailProvider)(nil)
+)
