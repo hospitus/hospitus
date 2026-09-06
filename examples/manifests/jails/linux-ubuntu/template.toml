@@ -1,0 +1,109 @@
+# Ubuntu jail on a FreeBSD host
+#
+# A jail with a Linux userland: Hospitus debootstraps Ubuntu into it, and the
+# binaries inside run through FreeBSD's Linux compatibility layer. There is no
+# virtual machine and no container runtime — it is a jail, with apt.
+#
+# What that buys, and what it costs:
+#
+#   - Software packaged for Ubuntu and never for FreeBSD becomes available
+#     without a VM, sharing the host kernel.
+#   - There is no init system. dpkg says so during install ("No init system
+#     and policy-rc.d missing"), and every service has to be started by hand
+#     or by a hook, as this manifest does for Apache.
+#   - Not every Linux program survives the compatibility layer. NGINX does
+#     not on FreeBSD 16-CURRENT: its workers exit at startup while the master
+#     keeps port 80, so the jail looks healthy and answers nothing. Apache
+#     runs, which is why this example uses it.
+#
+# The host needs the Ubuntu archive keyring, which debootstrap verifies the
+# release signature against, and the Linux modules:
+#
+#   pkg install ubuntu-keyring debootstrap
+#   kldload linux64
+#
+# hospitus init --check reports both.
+#
+# Usage:
+#   hospitus apply --start --pull jails/linux-ubuntu/template.toml
+#
+# Variables: name, os_version, bridge, linux_release
+
+[workload]
+api_version = "hospitus.io/v1"
+name = "{{ .name | default `linux-ubuntu` }}"
+description = "Ubuntu userland in a jail, serving over Apache"
+
+[workload.labels]
+runtime = "linux"
+
+[provider]
+type = "jail"
+
+[provider_overrides.jail]
+os_type = "linux"
+os_version = "{{ .linux_release | default `ubuntu-22.04` }}"
+
+# linprocfs and linsysfs are what a Linux userland reads for /proc and /sys.
+# reserved_ports lets Apache take port 80 after dropping privileges; a jail
+# refuses everything below 1024 without it.
+[provider_overrides.jail.parameters]
+"allow.mount.linprocfs" = true
+"allow.mount.linsysfs" = true
+"allow.reserved_ports" = true
+
+# The base image is FreeBSD's: it is the dataset the Linux userland is
+# unpacked into, not what runs.
+[image]
+source = "freebsd:{{ .os_version | default `14.3-RELEASE` }}"
+
+[resources]
+cpu = 2
+memory = "2Gi"
+
+[storage.root_disk]
+size = "10Gi"
+
+[[networks]]
+name = "public"
+type = "bridge"
+bridge = "{{ .bridge | default `hospitus0` }}"
+
+[networks.ip]
+mode = "dhcp"
+
+[lifecycle]
+stop_timeout = 30
+
+[lifecycle.health_check]
+# Ask Apache for a page. A jail whose service never started answers nothing
+# while looking perfectly healthy from the outside, which is the failure this
+# check exists to catch.
+command = ["curl", "-sf", "-m", "8", "-o", "/dev/null", "http://127.0.0.1:80/"]
+interval = "30s"
+timeout = "15s"
+retries = 3
+start_period = "60s"
+
+[lifecycle.hooks]
+# Apache starts on every boot, not once at creation. It used to live in the
+# post_create hook above, so the jail served nothing after its first restart.
+#
+# post_start runs on the host, hence the jexec: /run is a tmpfs the jail loses
+# on every stop, so its directories are recreated here too. There is no init
+# system to ask, and apache2ctl sources /etc/apache2/envvars, which expects
+# one — so the variables it wants are given on the command line.
+post_start = "jexec {{ .name | default `linux-ubuntu` }} sh -c 'mkdir -p /run/apache2 /run/lock/apache2 /var/log/apache2 && APACHE_CONFDIR=/etc/apache2 APACHE_RUN_USER=www-data APACHE_RUN_GROUP=www-data APACHE_PID_FILE=/run/apache2/apache2.pid APACHE_RUN_DIR=/run/apache2 APACHE_LOCK_DIR=/run/lock/apache2 APACHE_LOG_DIR=/var/log/apache2 /usr/sbin/apache2 -k start'"
+
+[[lifecycle.hooks.post_create]]
+type = "exec"
+on_failure = "stop"
+commands = [
+  # The mirrors answer with AAAA records, and this jail has no IPv6 route:
+  # apt would spend its timeouts on addresses it cannot reach.
+  "sh -c \"printf 'Acquire::ForceIPv4 \\\"true\\\";\\n' > /etc/apt/apt.conf.d/99force-ipv4\"",
+  "sh -c 'DEBIAN_FRONTEND=noninteractive apt-get update -qq'",
+  # apache2 and curl both come from main, which is the only component a
+  # debootstrapped Ubuntu enables. lighttpd and the rest live in universe.
+  "sh -c 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apache2 curl'",
+]

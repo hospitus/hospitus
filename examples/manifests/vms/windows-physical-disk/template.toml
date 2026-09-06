@@ -1,0 +1,133 @@
+# hospitus.io/v1 — Windows bhyve VM with physical disk passthrough
+#
+# WARNING: Physical disk passthrough gives the VM direct access to your disk.
+#          The VM CAN DESTROY data on this disk. Ensure it's the correct disk.
+#
+# Prerequisites:
+#   pkg install dnsmasq   # for DHCP in NAT mode (optional but recommended)
+#
+#   Passthrough is default-deny: name the device in hospitusd.conf and restart the
+#   daemon, or every create is refused with "not allow-listed for passthrough".
+#
+#     allowed_physical_disks = /dev/nda0
+#
+# Quick start:
+#   gpart show nda0                   # verify disk layout
+#   doas hospitus apply template.toml
+#   hospitus bhyve vnc windows-passthrough   # connect VNC and boot
+#
+# ── Reaching the console ─────────────────────────────────────────────────────
+#
+# vnc_wait below holds the VM before the UEFI firmware runs: nothing boots
+# until a VNC client connects. The server listens on the host's loopback, so
+# from another machine, tunnel to it first:
+#
+#   ssh -N -L 15900:127.0.0.1:5900 <freebsd-host>
+#
+# On macOS pick a local port other than 5900 — Screen Sharing already listens
+# there, and vnc://localhost:5900 shows you your own desktop. Screen Sharing
+# also cannot talk to bhyve, which offers no VNC authentication: it sits on a
+# password prompt that never completes. TigerVNC connects as-is:
+#
+#   /Applications/TigerVNC.app/Contents/MacOS/vncviewer localhost:15900
+#
+# ── Exposing SSH from the guest ──────────────────────────────────────────────
+#
+# Windows boots from a real disk, so Hospitus runs no hooks inside it. These
+# steps are done once, by hand, in an Administrator PowerShell in the guest:
+#
+#   Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+#   Set-Service -Name sshd -StartupType Automatic
+#   Start-Service sshd
+#
+# That alone leaves port 22 unreachable. Installing the server adds a firewall
+# rule scoped to the Private profile, but the NIC the VM presents is new to
+# Windows and lands in Public, so the rule never applies. Widen it:
+#
+#   Set-NetFirewallRule -Name OpenSSH-Server-In-TCP -Profile Any
+#
+# Reclassifying the network with Set-NetConnectionProfile -NetworkCategory
+# Private works too, but relaxes file sharing and discovery along with it.
+#
+# The VM sits on the NAT network, which nothing on the LAN can reach, so
+# forward a host port to it:
+#
+#   doas hospitus bhyve expose add windows-passthrough --port 2222:22
+#
+#   ssh -p 2222 <account>@<freebsd-host>
+#
+# The daemon finds the guest address in the dnsmasq leases by the MAC it
+# assigned. Before the guest has asked for a lease there is nothing to find,
+# and the command says so; name the address ipconfig reports instead:
+#
+#   doas hospitus bhyve expose add windows-passthrough --port 2222:22 \
+#     --target-ip 10.10.0.87
+#
+# The rule is recorded under /var/lib/hospitus/firewall/rules and re-applied when
+# the daemon starts, so a reboot does not lose it — but it keeps naming the
+# address it was given. A guest that comes back on a different lease needs the
+# rule added again with the address it holds now.
+#
+# Adding the rule reloads the PF anchor, which resets established connections
+# to the host — including the tunnel carrying your VNC session. Do the guest
+# side first.
+
+[workload]
+api_version = "hospitus.io/v1"
+name = "{{ .name | default `windows-passthrough` }}"
+
+[workload.labels]
+"hospitus.io/category" = "vm"
+os = "windows"
+
+[workload.annotations]
+description = "Windows VM booting from the whole nda0 disk, passed through"
+
+[provider]
+type = "bhyve"
+
+[image]
+# No image needed - booting from physical disk
+source = "none"
+
+[resources]
+cpu = 4
+memory = "8Gi"
+
+[[networks]]
+name = "public"
+type = "nat"
+
+[networks.ip]
+mode = "dhcp"
+
+[storage.root_disk]
+# Physical device passthrough for root disk
+# Pass the WHOLE DISK (not a partition) so UEFI can read GPT and find ESP
+type = "physical"
+path = "{{ .disk_path | default `/dev/nda0` }}"
+
+[provider_overrides.bhyve]
+bootloader  = "uefi"
+disk_driver = "ahci-hd"  # Windows requires ahci-hd — no VirtIO driver on physical disk
+# VNC: connect to observe boot (vncviewer 127.0.0.1:5900)
+#
+# bhyve's VNC server has no authentication, so anyone with a local account on
+# this host — or anything that can reach the address it binds — has the
+# keyboard and screen of a guest that owns a whole physical disk. It is bound
+# to the loopback for that reason, which is the strongest thing the manifest
+# can do; on a host with other users, or one where 127.0.0.1 is forwarded, run
+# this example only while you are watching the installation, and remove the
+# line once the guest boots on its own.
+vnc = "127.0.0.1:5900"
+
+[provider_overrides.bhyve.parameters]
+tpm      = true
+vnc_wait = true   # wait for VNC connection before first boot
+# e1000 NIC: Windows has no VirtIO drivers until they are installed.
+nic_driver = "e1000"
+# Ignore unimplemented MSR accesses (-w). Required on AMD hardware.
+ignore_msr = true
+
+# Optional: PCI passthrough (e.g., GPU, WiFi)
+# passthrough = ["{{ .pci_slot | default `0/2/0` }}"]

@@ -1,0 +1,107 @@
+---
+# Ansible Playbook for Hospitus VMs
+#
+# This playbook demonstrates using existing Ansible roles with Hospitus VMs.
+# The VM was bootstrapped with cloud-init (Python installed, SSH keys configured).
+#
+# Usage:
+#   hospitus apply --start ansible-ready.toml   # Create VM
+#   sleep 120                                 # Wait for boot
+#   ansible-playbook -i inventory.ini site.yml
+#
+# For production, use:
+#   ansible-playbook -i inventory.ini site.yml --ask-become-pass
+
+- name: Configure web servers
+  hosts: webservers
+  become: true
+
+  vars:
+    nginx_vhosts:
+      - listen: "80"
+        server_name: "example.com"
+        root: "/var/www/html"
+        index: "index.html index.htm"
+
+    app_packages:
+      - nginx
+      - curl
+      - htop
+      - vim
+
+  tasks:
+    - name: Wait for cloud-init to complete
+      ansible.builtin.wait_for:
+        path: /var/log/ansible-ready
+        state: present
+        timeout: 300
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      ansible.builtin.apt:
+        name: "{{ app_packages }}"
+        state: present
+
+    - name: Create web root directory
+      ansible.builtin.file:
+        path: /var/www/html
+        state: directory
+        mode: '0755'
+        owner: www-data
+        group: www-data
+
+    - name: Create index.html
+      ansible.builtin.copy:
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Hospitus + Ansible</title>
+          </head>
+          <body>
+              <h1>Hello from Hospitus!</h1>
+              <p>This server was provisioned by:</p>
+              <ul>
+                  <li>Cloud-init for initial bootstrap</li>
+                  <li>Ansible for application configuration</li>
+              </ul>
+              <p>Hostname: {{ ansible_hostname }}</p>
+              <p>OS: {{ ansible_distribution }} {{ ansible_distribution_version }}</p>
+          </body>
+          </html>
+        dest: /var/www/html/index.html
+        mode: '0644'
+        owner: www-data
+        group: www-data
+
+    - name: Configure nginx
+      ansible.builtin.template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/sites-available/default
+        mode: '0644'
+      notify: Restart nginx
+
+    - name: Enable nginx service
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Restart nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
+
+- name: Configure database servers
+  hosts: databases
+  become: true
+
+  tasks:
+    - name: Placeholder for database configuration
+      ansible.builtin.debug:
+        msg: "Database servers would be configured here"

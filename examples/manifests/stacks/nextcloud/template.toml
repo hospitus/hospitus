@@ -1,0 +1,462 @@
+# Nextcloud, split across four jails
+#
+# The point of this manifest is the separation, not the software. Each tier
+# runs in its own jail with its own resources, its own dataset and its own
+# health check, and only the ports it needs cross between them:
+#
+#   web    Caddy. Serves the static files and hands .php to the app tier.
+#          The only jail that publishes a port to the outside.
+#   app    Nextcloud and PHP-FPM. Holds no database and stores no user file.
+#   db     PostgreSQL 16, on its own dataset.
+#   redis  Transactional file locking and cache. Nextcloud is markedly
+#          slower, and less safe under concurrency, without it.
+#
+# Two volumes matter more than the rest:
+#
+#   code   /usr/local/www/nextcloud, written by the app tier when it installs
+#          the package, mounted read-only by web. One copy, two readers.
+#   data   /var/db/nextcloud-data. Nextcloud's own guidance is that the data
+#          directory must sit outside the web root; here it is not merely
+#          outside it but on a different dataset, so no web server
+#          misconfiguration can serve a user's files.
+#
+# Every jail also gets an interface on the NAT bridge, because installing
+# packages needs a route off the internal segment.
+#
+# Usage:
+#   hospitus apply --start nextcloud/template.toml
+#   # then browse to the web jail's address
+#
+# Variables: name, os_version, os_arch, nas_pool, bridge, pkg_repo
+
+[stack]
+api_version = "hospitus.io/v1"
+name = "{{ .name | default `nextcloud` }}"
+
+# ─────────────────────────────────────────────────────────────── database ──
+[[instances]]
+name = "db"
+provider = "jail"
+
+[instances.image]
+source = "freebsd:{{ .os_version | default `14.3-RELEASE` }}"
+arch = "{{ .os_arch | default `amd64` }}"
+
+[instances.resources]
+cpu = 2
+memory = "2Gi"
+
+[instances.storage.root_disk]
+size = "10Gi"
+
+# The database lives on its own dataset: lz4 costs little on this shape of
+# data, and the quota is what stops a runaway table filling the pool.
+[[instances.storage.volumes]]
+name = "pgdata"
+size = "50Gi"
+mount_path = "/var/db/postgres"
+
+[instances.storage.volumes.zfs]
+compression = "lz4"
+quota = "50Gi"
+
+[[instances.networks]]
+name = "internal"
+type = "bridge"
+bridge = "ncint"
+ip_pool = "10.32.0.0/24"
+
+[instances.networks.ip]
+mode = "static"
+address = "10.32.0.10/24"
+
+# Packages come from the mirrors, which the internal segment does not reach.
+[[instances.networks]]
+name = "public"
+type = "bridge"
+bridge = "{{ .bridge | default `hospitus0` }}"
+
+[instances.networks.ip]
+mode = "dhcp"
+
+# PostgreSQL asks the kernel for a System V shared memory segment at startup
+# and refuses to run without one:
+#
+#     Failed system call was shmget(key=47294, size=56, 03600).
+#
+# A jail denies System V IPC by default, which is the right default. The old
+# way to lift it, allow.sysvipc, hands the jail the host's IPC objects — the
+# opposite of what a database jail should have. These give it namespaces of
+# its own, which is what jail(8) recommends instead.
+[instances.provider_overrides.jail.parameters]
+sysvshm = "new"
+sysvsem = "new"
+sysvmsg = "new"
+
+[instances.lifecycle.health_check]
+# pg_isready answers only once postgres accepts connections, which is what
+# the app tier is waiting on.
+command = ["pg_isready", "-q"]
+interval = "30s"
+timeout = "10s"
+retries = 5
+start_period = "90s"
+
+[instances.lifecycle.hooks]
+[[instances.lifecycle.hooks.post_create]]
+type = "exec"
+on_failure = "stop"
+commands = [
+  "mkdir -p /usr/local/etc/pkg/repos",
+  # A quarterly package can carry a higher __FreeBSD_version than the image:
+  # FreeBSD:14 is built on the newest supported point release, not on 14.3.
+  # pkg would stop and prompt, which a non-interactive hook cannot answer.
+  "sh -c 'mkdir -p /usr/local/etc && { grep -qs IGNORE_OSVERSION /usr/local/etc/pkg.conf || echo IGNORE_OSVERSION=true >> /usr/local/etc/pkg.conf; }'",
+  # pkg follows AAAA records even where nothing routes IPv6, and then fails
+  # with "Address family for host not supported". Ask whether the repository
+  # actually answers over IPv6, so a real dual-stack host is left alone.
+  "sh -c 'grep -qs IP_VERSION /usr/local/etc/pkg.conf || fetch -6 -q -T 5 -o /dev/null http://pkg.FreeBSD.org/ 2>/dev/null || echo IP_VERSION=4 >> /usr/local/etc/pkg.conf'",
+  "sh -c \"REPO_TYPE='{{ .pkg_repo | default `auto` }}'; if [ \\$REPO_TYPE = 'auto' ]; then if uname -m | grep -q 'arm64' || uname -r | grep -Eq 'CURRENT|STABLE'; then REPO_TYPE='latest'; else REPO_TYPE='quarterly'; fi; fi; REPO_NAME='FreeBSD'; if [ \\$(uname -r | cut -d. -f1) -ge 15 ]; then REPO_NAME='FreeBSD-ports'; fi; printf '%s: { url: \\\"http://pkg.FreeBSD.org/\\${ABI}/%s\\\" }\\n' \\$REPO_NAME \\$REPO_TYPE > /usr/local/etc/pkg/repos/FreeBSD.conf\"",
+  "env ASSUME_ALWAYS_YES=yes pkg bootstrap -f",
+  "pkg update -f",
+  "pkg install -y postgresql16-server",
+  "sysrc postgresql_enable=YES",
+  "sysrc postgresql_data=/var/db/postgres/data16",
+  "sh -c 'chown -R postgres:postgres /var/db/postgres'",
+  "su -m postgres -c '/usr/local/bin/initdb -D /var/db/postgres/data16 -E UTF8 --locale=C'",
+  # Only the app jail may connect, and only to its own database.
+  "sh -c \"printf \\\"listen_addresses = '10.32.0.10'\\\\n\\\" >> /var/db/postgres/data16/postgresql.conf\"",
+  "sh -c \"printf 'host nextcloud nextcloud 10.32.0.12/32 scram-sha-256\\n' >> /var/db/postgres/data16/pg_hba.conf\"",
+  "service postgresql start",
+  "sh -c 'for i in $(jot 30); do /usr/local/bin/pg_isready -q && break; sleep 1; done'",
+  "su -m postgres -c \"/usr/local/bin/psql -c \\\"CREATE ROLE nextcloud LOGIN PASSWORD '{{ secret `nc_db_pass` }}'\\\"\"",
+  "su -m postgres -c '/usr/local/bin/createdb -O nextcloud nextcloud'",
+]
+
+# ────────────────────────────────────────────────────────────────── cache ──
+[[instances]]
+name = "redis"
+provider = "jail"
+
+[instances.image]
+source = "freebsd:{{ .os_version | default `14.3-RELEASE` }}"
+arch = "{{ .os_arch | default `amd64` }}"
+
+[instances.resources]
+cpu = 1
+memory = "1Gi"
+
+[instances.storage.root_disk]
+size = "5Gi"
+
+[[instances.networks]]
+name = "internal"
+type = "bridge"
+bridge = "ncint"
+ip_pool = "10.32.0.0/24"
+
+[instances.networks.ip]
+mode = "static"
+address = "10.32.0.11/24"
+
+[[instances.networks]]
+name = "public"
+type = "bridge"
+bridge = "{{ .bridge | default `hospitus0` }}"
+
+[instances.networks.ip]
+mode = "dhcp"
+
+[instances.lifecycle.health_check]
+# redis-cli answers PONG once the server accepts connections; one still
+# loading its dataset does not. The server requires a password now, so without
+# one the check gets NOAUTH and the tier never reports healthy.
+#
+# REDISCLI_AUTH read from a file, not "-a <pass>" and not an assignment on this
+# line: either would put the password in the arguments of a process that runs
+# every thirty seconds, where anything in the jail can read it.
+command = ["sh", "-c", "REDISCLI_AUTH=$(cat /root/.redis-auth) redis-cli -h 10.32.0.11 --no-auth-warning ping"]
+interval = "30s"
+timeout = "5s"
+retries = 5
+start_period = "60s"
+
+[instances.lifecycle.hooks]
+[[instances.lifecycle.hooks.post_create]]
+type = "exec"
+on_failure = "stop"
+commands = [
+  "mkdir -p /usr/local/etc/pkg/repos",
+  # A quarterly package can carry a higher __FreeBSD_version than the image:
+  # FreeBSD:14 is built on the newest supported point release, not on 14.3.
+  # pkg would stop and prompt, which a non-interactive hook cannot answer.
+  "sh -c 'mkdir -p /usr/local/etc && { grep -qs IGNORE_OSVERSION /usr/local/etc/pkg.conf || echo IGNORE_OSVERSION=true >> /usr/local/etc/pkg.conf; }'",
+  # pkg follows AAAA records even where nothing routes IPv6, and then fails
+  # with "Address family for host not supported". Ask whether the repository
+  # actually answers over IPv6, so a real dual-stack host is left alone.
+  "sh -c 'grep -qs IP_VERSION /usr/local/etc/pkg.conf || fetch -6 -q -T 5 -o /dev/null http://pkg.FreeBSD.org/ 2>/dev/null || echo IP_VERSION=4 >> /usr/local/etc/pkg.conf'",
+  "sh -c \"REPO_TYPE='{{ .pkg_repo | default `auto` }}'; if [ \\$REPO_TYPE = 'auto' ]; then if uname -m | grep -q 'arm64' || uname -r | grep -Eq 'CURRENT|STABLE'; then REPO_TYPE='latest'; else REPO_TYPE='quarterly'; fi; fi; REPO_NAME='FreeBSD'; if [ \\$(uname -r | cut -d. -f1) -ge 15 ]; then REPO_NAME='FreeBSD-ports'; fi; printf '%s: { url: \\\"http://pkg.FreeBSD.org/\\${ABI}/%s\\\" }\\n' \\$REPO_NAME \\$REPO_TYPE > /usr/local/etc/pkg/repos/FreeBSD.conf\"",
+  "env ASSUME_ALWAYS_YES=yes pkg bootstrap -f",
+  "pkg update -f",
+  "pkg install -y redis",
+  # Bound to the internal segment only: nothing outside it has any business
+  # reaching a cache that holds file locks.
+  "sh -c \"sed -i '' 's/^bind .*/bind 10.32.0.11/' /usr/local/etc/redis.conf\"",
+  # protected-mode off is what a bound address costs; the password is what
+  # replaces it. ncint carries the app and web jails too, and Redis holds
+  # Nextcloud's file locks — anything on that segment could take or release
+  # them, and read the cache, with no credential at all.
+  "sh -c \"sed -i '' 's/^protected-mode .*/protected-mode no/' /usr/local/etc/redis.conf\"",
+  "sh -c \"printf 'requirepass %s\\n' '{{ secret `nc_redis_pass` }}' >> /usr/local/etc/redis.conf\"",
+  # The same value where the health check can read it, so that check does not
+  # have to carry it in its own arguments: "redis-cli -a <pass>" shows the
+  # password in the jail's process table on every run.
+  "sh -c \"umask 077; printf '%s' '{{ secret `nc_redis_pass` }}' > /root/.redis-auth\"",
+  "sysrc redis_enable=YES",
+  "service redis start",
+]
+
+# ──────────────────────────────────────────────────────────── application ──
+[[instances]]
+name = "app"
+provider = "jail"
+
+# Both must accept connections before the installer runs: it writes the
+# schema into one and the locking configuration into the other.
+[instances.depends_on]
+services = ["db", "redis"]
+condition = "healthy"
+
+[instances.image]
+source = "freebsd:{{ .os_version | default `14.3-RELEASE` }}"
+arch = "{{ .os_arch | default `amd64` }}"
+
+[instances.resources]
+cpu = 4
+memory = "4Gi"
+
+[instances.storage.root_disk]
+size = "10Gi"
+
+# The code. Written here by pkg, read by the web tier from the same host
+# path — one copy, and no way for the two to drift apart.
+#
+# The path carries the deployment's name because config.php lives in it. A
+# fixed path would hand every later deployment the previous one's installed
+# state: maintenance:install finds Nextcloud already there, declines to
+# install, and the stack comes up configured by a manifest nobody is running
+# any more.
+[[instances.storage.volumes]]
+name = "code"
+host_path = "{{ .nas_pool | default `/zroot/hospitus` }}/nextcloud/{{ .name | default `nextcloud` }}/code"
+mount_path = "/usr/local/www/nextcloud"
+
+# The user files, on a dataset of their own. Nextcloud requires this
+# directory to sit outside the web root; putting it on a separate dataset as
+# well means no web server misconfiguration can reach it, and it can be
+# snapshotted and quota'd without the code.
+[[instances.storage.volumes]]
+name = "data"
+size = "500Gi"
+mount_path = "/var/db/nextcloud-data"
+
+[instances.storage.volumes.zfs]
+compression = "lz4"
+quota = "500Gi"
+
+[[instances.networks]]
+name = "internal"
+type = "bridge"
+bridge = "ncint"
+ip_pool = "10.32.0.0/24"
+
+[instances.networks.ip]
+mode = "static"
+address = "10.32.0.12/24"
+
+[[instances.networks]]
+name = "public"
+type = "bridge"
+bridge = "{{ .bridge | default `hospitus0` }}"
+
+[instances.networks.ip]
+mode = "dhcp"
+
+[instances.lifecycle.health_check]
+# occ talks to the database and reads the installed configuration, so a
+# reply here means the application is genuinely installed, not merely that
+# PHP-FPM is listening.
+command = ["su", "-m", "www", "-c", "/usr/local/bin/php /usr/local/www/nextcloud/occ status"]
+interval = "30s"
+timeout = "20s"
+retries = 5
+start_period = "180s"
+
+[instances.lifecycle.hooks]
+[[instances.lifecycle.hooks.post_create]]
+type = "exec"
+on_failure = "stop"
+commands = [
+  "mkdir -p /usr/local/etc/pkg/repos",
+  # A quarterly package can carry a higher __FreeBSD_version than the image:
+  # FreeBSD:14 is built on the newest supported point release, not on 14.3.
+  # pkg would stop and prompt, which a non-interactive hook cannot answer.
+  "sh -c 'mkdir -p /usr/local/etc && { grep -qs IGNORE_OSVERSION /usr/local/etc/pkg.conf || echo IGNORE_OSVERSION=true >> /usr/local/etc/pkg.conf; }'",
+  # pkg follows AAAA records even where nothing routes IPv6, and then fails
+  # with "Address family for host not supported". Ask whether the repository
+  # actually answers over IPv6, so a real dual-stack host is left alone.
+  "sh -c 'grep -qs IP_VERSION /usr/local/etc/pkg.conf || fetch -6 -q -T 5 -o /dev/null http://pkg.FreeBSD.org/ 2>/dev/null || echo IP_VERSION=4 >> /usr/local/etc/pkg.conf'",
+  "sh -c \"REPO_TYPE='{{ .pkg_repo | default `auto` }}'; if [ \\$REPO_TYPE = 'auto' ]; then if uname -m | grep -q 'arm64' || uname -r | grep -Eq 'CURRENT|STABLE'; then REPO_TYPE='latest'; else REPO_TYPE='quarterly'; fi; fi; REPO_NAME='FreeBSD'; if [ \\$(uname -r | cut -d. -f1) -ge 15 ]; then REPO_NAME='FreeBSD-ports'; fi; printf '%s: { url: \\\"http://pkg.FreeBSD.org/\\${ABI}/%s\\\" }\\n' \\$REPO_NAME \\$REPO_TYPE > /usr/local/etc/pkg/repos/FreeBSD.conf\"",
+  "env ASSUME_ALWAYS_YES=yes pkg bootstrap -f",
+  "pkg update -f",
+  # The nextcloud package brings PHP and its own dependencies, but neither the
+  # PostgreSQL driver nor the cache modules: the port is built against MySQL,
+  # and without pgsql the installer stops at "Database <pgsql> is not
+  # supported. mysql are supported." — which says nothing about a missing
+  # extension. Without the cache modules, configuring them fails the same
+  # unhelpful way: "not available for local cache".
+  "pkg install -y nextcloud-php83 php83-pgsql php83-pdo_pgsql php83-pecl-redis php83-pecl-APCu",
+  # PHP-FPM answers the web jail over the internal segment, and nothing else.
+  "sh -c \"sed -i '' 's|^listen = .*|listen = 10.32.0.12:9000|' /usr/local/etc/php-fpm.d/www.conf\"",
+  "sh -c \"sed -i '' 's|^;listen.allowed_clients.*|listen.allowed_clients = 10.32.0.13|' /usr/local/etc/php-fpm.d/www.conf\"",
+  "sh -c 'cp /usr/local/etc/php.ini-production /usr/local/etc/php.ini'",
+  "sh -c \"sed -i '' 's/^memory_limit = .*/memory_limit = 512M/' /usr/local/etc/php.ini\"",
+  # APCu is off for command-line PHP by default, and occ is command-line PHP:
+  # without this every occ call fails on a local cache it cannot reach.
+  "sh -c \"printf 'opcache.enable=1\\nopcache.interned_strings_buffer=16\\nopcache.memory_consumption=128\\napc.enable_cli=1\\n' >> /usr/local/etc/php.ini\"",
+  "sh -c 'install -d -o www -g www -m 0750 /var/db/nextcloud-data'",
+  "sh -c 'chown -R www:www /usr/local/www/nextcloud'",
+  # The installer creates the schema and the admin account in one step, with
+  # the data directory pointed outside the web root.
+  "su -m www -c \"/usr/local/bin/php /usr/local/www/nextcloud/occ maintenance:install --database pgsql --database-name nextcloud --database-host 10.32.0.10 --database-user nextcloud --database-pass '{{ secret `nc_db_pass` }}' --admin-user admin --admin-pass '{{ secret `nc_admin_pass` }}' --data-dir /var/db/nextcloud-data\"",
+  # Where Redis is, before anything is told to use it. The order is not a
+  # matter of taste: the moment memcache.locking names Redis, every occ call
+  # after it opens a connection, and until redis host is set that connection
+  # goes to 127.0.0.1 in this jail, where nothing listens. The install then
+  # ends on "RedisException: Connection refused", which points at the cache
+  # tier rather than at the order it was configured in.
+  "su -m www -c \"/usr/local/bin/php /usr/local/www/nextcloud/occ config:system:set redis host --value=10.32.0.11\"",
+  "su -m www -c \"/usr/local/bin/php /usr/local/www/nextcloud/occ config:system:set redis port --value=6379 --type=integer\"",
+  "su -m www -c \"/usr/local/bin/php /usr/local/www/nextcloud/occ config:system:set redis password --value='{{ secret `nc_redis_pass` }}'\"",
+  # APCu for the local cache, Redis for locking — Nextcloud's own division.
+  # Locking is the one that matters: without it two concurrent writes to the
+  # same file can corrupt it, and APCu cannot do it because it is per-process
+  # while the tiers are separate jails.
+  "su -m www -c \"/usr/local/bin/php /usr/local/www/nextcloud/occ config:system:set memcache.local --value='\\\\OC\\\\Memcache\\\\APCu'\"",
+  "su -m www -c \"/usr/local/bin/php /usr/local/www/nextcloud/occ config:system:set memcache.locking --value='\\\\OC\\\\Memcache\\\\Redis'\"",
+  # The web jail is what browsers reach, so it is the host Nextcloud must
+  # accept in the Host header.
+  "su -m www -c \"/usr/local/bin/php /usr/local/www/nextcloud/occ config:system:set trusted_domains 1 --value=10.32.0.13\"",
+  # The published mapping below is 8080, and this is the Host header a browser
+  # sends when it reaches the stack there. Nextcloud compares that header
+  # against trusted_domains and answers "access through untrusted domain" for
+  # anything missing from it.
+  #
+  # Written out rather than templated: the value lands inside a shell command,
+  # and a variable holding a quote or a semicolon would run as one. Edit this
+  # line for a different address.
+  "su -m www -c \"/usr/local/bin/php /usr/local/www/nextcloud/occ config:system:set trusted_domains 2 --value=localhost:8080\"",
+  # The rc script is php_fpm, matching the php_fpm_enable variable above.
+  # "php-fpm" is the binary's name and rc knows nothing by it.
+  "sysrc php_fpm_enable=YES",
+  "service php_fpm start",
+]
+
+# ────────────────────────────────────────────────────────────────── front ──
+[[instances]]
+name = "web"
+provider = "jail"
+
+# There is nothing to serve until the application is installed.
+[instances.depends_on]
+services = ["app"]
+condition = "healthy"
+
+[instances.image]
+source = "freebsd:{{ .os_version | default `14.3-RELEASE` }}"
+arch = "{{ .os_arch | default `amd64` }}"
+
+[instances.resources]
+cpu = 2
+memory = "1Gi"
+
+[instances.storage.root_disk]
+size = "5Gi"
+
+# The same directory the app tier installed into, mounted read-only: this
+# jail serves the code and must never be able to change it.
+[[instances.storage.volumes]]
+name = "code"
+host_path = "{{ .nas_pool | default `/zroot/hospitus` }}/nextcloud/{{ .name | default `nextcloud` }}/code"
+mount_path = "/usr/local/www/nextcloud"
+read_only = true
+
+[[instances.networks]]
+name = "internal"
+type = "bridge"
+bridge = "ncint"
+ip_pool = "10.32.0.0/24"
+
+[instances.networks.ip]
+mode = "static"
+address = "10.32.0.13/24"
+
+[[instances.networks]]
+name = "public"
+type = "bridge"
+bridge = "{{ .bridge | default `hospitus0` }}"
+
+[instances.networks.ip]
+mode = "dhcp"
+
+[[instances.networks.ports]]
+host = 8080
+container = 80
+protocol = "tcp"
+
+# Caddy drops its privileges and then binds port 80, which a jail refuses by
+# default — every port below 1024 is reserved:
+#
+#     listen tcp :80: bind: permission denied
+#
+# This is the whole grant: the web tier may take a low port. It is the only
+# instance in the stack that needs it, and it needs nothing else.
+[instances.provider_overrides.jail.parameters]
+"allow.reserved_ports" = true
+
+[instances.lifecycle.health_check]
+# status.php is answered by Nextcloud itself, through PHP-FPM, through the
+# database. A reply here means the whole stack works, which is why this is
+# the check that matters.
+command = ["fetch", "-T", "5", "-qo", "/dev/null", "http://127.0.0.1:80/status.php"]
+interval = "30s"
+timeout = "10s"
+retries = 5
+start_period = "120s"
+
+[instances.lifecycle.hooks]
+[[instances.lifecycle.hooks.post_create]]
+type = "exec"
+on_failure = "stop"
+commands = [
+  "mkdir -p /usr/local/etc/pkg/repos",
+  # A quarterly package can carry a higher __FreeBSD_version than the image:
+  # FreeBSD:14 is built on the newest supported point release, not on 14.3.
+  # pkg would stop and prompt, which a non-interactive hook cannot answer.
+  "sh -c 'mkdir -p /usr/local/etc && { grep -qs IGNORE_OSVERSION /usr/local/etc/pkg.conf || echo IGNORE_OSVERSION=true >> /usr/local/etc/pkg.conf; }'",
+  # pkg follows AAAA records even where nothing routes IPv6, and then fails
+  # with "Address family for host not supported". Ask whether the repository
+  # actually answers over IPv6, so a real dual-stack host is left alone.
+  "sh -c 'grep -qs IP_VERSION /usr/local/etc/pkg.conf || fetch -6 -q -T 5 -o /dev/null http://pkg.FreeBSD.org/ 2>/dev/null || echo IP_VERSION=4 >> /usr/local/etc/pkg.conf'",
+  "sh -c \"REPO_TYPE='{{ .pkg_repo | default `auto` }}'; if [ \\$REPO_TYPE = 'auto' ]; then if uname -m | grep -q 'arm64' || uname -r | grep -Eq 'CURRENT|STABLE'; then REPO_TYPE='latest'; else REPO_TYPE='quarterly'; fi; fi; REPO_NAME='FreeBSD'; if [ \\$(uname -r | cut -d. -f1) -ge 15 ]; then REPO_NAME='FreeBSD-ports'; fi; printf '%s: { url: \\\"http://pkg.FreeBSD.org/\\${ABI}/%s\\\" }\\n' \\$REPO_NAME \\$REPO_TYPE > /usr/local/etc/pkg/repos/FreeBSD.conf\"",
+  "env ASSUME_ALWAYS_YES=yes pkg bootstrap -f",
+  "pkg update -f",
+  "pkg install -y caddy",
+  # The @forbidden matcher is not optional hardening: file_server otherwise
+  # serves /data (every user's files), /config (the database password) and
+  # /db_structure.xml to anyone who asks for them by path. Nextcloud's own
+  # deployment guide lists exactly these.
+  "sh -c \"printf ':80 {\\n\\troot * /usr/local/www/nextcloud\\n\\tencode gzip\\n\\t@forbidden {\\n\\t\\tpath /data/* /config/* /db_structure.xml /.ht* /3rdparty/* /lib/* /templates/* /occ /console.php\\n\\t}\\n\\trespond @forbidden 404\\n\\tphp_fastcgi 10.32.0.12:9000\\n\\tfile_server\\n\\tredir /.well-known/carddav /remote.php/dav 301\\n\\tredir /.well-known/caldav /remote.php/dav 301\\n}\\n' > /usr/local/etc/caddy/Caddyfile\"",
+  "sysrc caddy_enable=YES",
+  "service caddy start",
+]

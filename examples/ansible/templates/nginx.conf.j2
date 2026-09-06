@@ -1,0 +1,33 @@
+{% for vhost in nginx_vhosts %}
+server {
+{# default_server is legal once per listen address: nginx refuses to start
+   with "a duplicate default server" if two vhosts both claim it, so only the
+   first one listening on a given port gets it. #}
+    listen {{ vhost.listen }}{% if loop.first %} default_server{% endif %};
+    listen [::]:{{ vhost.listen }}{% if loop.first %} default_server{% endif %};
+
+    root {{ vhost.root }};
+    index {{ vhost.index }};
+
+    server_name {{ vhost.server_name | default(ansible_hostname) }};
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # Health check endpoint
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+
+    # Status endpoint
+    location /nginx_status {
+        stub_status on;
+        access_log off;
+        allow 127.0.0.1;
+        deny all;
+    }
+}
+{% endfor %}
