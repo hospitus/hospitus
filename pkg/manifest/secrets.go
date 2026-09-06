@@ -3,6 +3,7 @@ package manifest
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,6 +33,10 @@ type SecretStore interface {
 	// List returns all secret names in a scope
 	List(scope string) ([]string, error)
 }
+
+// ErrSecretNotFound is what Lookup answers for a secret that was never
+// generated. Get has no use for it: generating is what Get is for.
+var ErrSecretNotFound = errors.New("secret not found")
 
 // FileSecretStore implements SecretStore using local files
 type FileSecretStore struct {
@@ -161,6 +166,37 @@ func (s *FileSecretStore) Get(scope, name string) (string, error) {
 
 	// Generate new
 	return s.generateAndSave(scope, name, false)
+}
+
+// Lookup reads a secret without creating one.
+//
+// Get generates on a miss, which is what a manifest wants: it declares a
+// secret and the first render materializes it. A reader wants the opposite.
+// "hospitus secret get" listed the scope first and called Get only for a name
+// it had just seen, but the file can go between the two — and Get then minted
+// a fresh value and saved it, handing back a credential that matched nothing
+// else using that secret.
+func (s *FileSecretStore) Lookup(scope, name string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path, err := s.path(scope, name)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := os.ReadFile(path)
+	switch {
+	case os.IsNotExist(err):
+		return "", fmt.Errorf("%w: %s/%s", ErrSecretNotFound, scope, name)
+	case err != nil:
+		return "", fmt.Errorf("failed to read secret %s: %w", name, err)
+	case len(data) == 0:
+		// Left by a crash between create and write. Reported, never repaired
+		// here: repairing is a write, and this is the read path.
+		return "", fmt.Errorf("%w: %s/%s is empty", ErrSecretNotFound, scope, name)
+	}
+	return string(data), nil
 }
 
 // Rotate generates a new value for a secret
