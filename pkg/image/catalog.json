@@ -1,0 +1,691 @@
+[
+  {
+    "name": "freebsd-14.3-RELEASE-amd64",
+    "display": "FreeBSD 14.3-RELEASE (amd64)",
+    "description": "FreeBSD 14.3-RELEASE base system for amd64",
+    "category": "set",
+    "format": "txz",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "amd64",
+    "providers": [
+      "jail"
+    ],
+    "url": "https://download.freebsd.org/releases/amd64/14.3-RELEASE/base.txz"
+  },
+  {
+    "name": "freebsd-14.3-RELEASE-arm64",
+    "display": "FreeBSD 14.3-RELEASE (arm64)",
+    "description": "FreeBSD 14.3-RELEASE base system for arm64",
+    "category": "set",
+    "format": "txz",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "arm64",
+    "providers": [
+      "jail"
+    ],
+    "url": "https://download.freebsd.org/releases/arm64/aarch64/14.3-RELEASE/base.txz"
+  },
+  {
+    "name": "freebsd-14.3-RELEASE-riscv64",
+    "display": "FreeBSD 14.3-RELEASE (riscv64)",
+    "description": "FreeBSD 14.3-RELEASE base system for RISC-V 64-bit",
+    "category": "set",
+    "format": "txz",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "riscv64",
+    "providers": [
+      "jail"
+    ],
+    "url": "https://download.freebsd.org/releases/riscv/riscv64/14.3-RELEASE/base.txz"
+  },
+  {
+    "name": "freebsd-14.3-RELEASE-i386",
+    "display": "FreeBSD 14.3-RELEASE (i386)",
+    "description": "FreeBSD 14.3-RELEASE base system for 32-bit x86",
+    "category": "set",
+    "format": "txz",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "i386",
+    "providers": [
+      "jail"
+    ],
+    "url": "https://download.freebsd.org/releases/i386/14.3-RELEASE/base.txz"
+  },
+  {
+    "name": "ubuntu-24.04-rootfs-amd64",
+    "display": "Ubuntu 24.04 LTS Rootfs (amd64)",
+    "description": "Ubuntu 24.04 Noble root filesystem for Linux jails",
+    "category": "set",
+    "format": "tar.xz",
+    "os_type": "linux",
+    "os_version": "24.04",
+    "arch": "amd64",
+    "providers": [
+      "jail"
+    ],
+    "url": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64-root.tar.xz",
+    "default_user": "ubuntu"
+  },
+  {
+    "name": "ubuntu-22.04-rootfs-amd64",
+    "display": "Ubuntu 22.04 LTS Rootfs (amd64)",
+    "description": "Ubuntu 22.04 Jammy root filesystem for Linux jails",
+    "category": "set",
+    "format": "tar.xz",
+    "os_type": "linux",
+    "os_version": "22.04",
+    "arch": "amd64",
+    "providers": [
+      "jail"
+    ],
+    "url": "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64-root.tar.xz",
+    "default_user": "ubuntu"
+  },
+  {
+    "name": "alpine-3.20-rootfs-amd64",
+    "display": "Alpine 3.20 Rootfs (amd64)",
+    "description": "Alpine Linux 3.20 minirootfs for Linux jails - extremely lightweight",
+    "category": "set",
+    "format": "tar.gz",
+    "os_type": "linux",
+    "os_version": "3.20",
+    "arch": "amd64",
+    "providers": [
+      "jail"
+    ],
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.0-x86_64.tar.gz",
+    "default_user": "root"
+  },
+  {
+    "name": "alpine-3.19-rootfs-amd64",
+    "display": "Alpine 3.19 Rootfs (amd64)",
+    "description": "Alpine Linux 3.19 minirootfs for Linux jails",
+    "category": "set",
+    "format": "tar.gz",
+    "os_type": "linux",
+    "os_version": "3.19",
+    "arch": "amd64",
+    "providers": [
+      "jail"
+    ],
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-minirootfs-3.19.0-x86_64.tar.gz",
+    "default_user": "root"
+  },
+  {
+    "name": "debian-12-rootfs-amd64",
+    "display": "Debian 12 Bookworm Rootfs (amd64)",
+    "description": "Debian 12 root filesystem for Linux jails",
+    "category": "set",
+    "format": "tar.xz",
+    "os_type": "linux",
+    "os_version": "12",
+    "arch": "amd64",
+    "providers": [
+      "jail"
+    ],
+    "url": "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.tar.xz",
+    "default_user": "debian"
+  },
+  {
+    "name": "freebsd-14.3-RELEASE-amd64-dvd",
+    "display": "FreeBSD 14.3-RELEASE DVD (amd64)",
+    "description": "FreeBSD 14.3-RELEASE installation DVD ISO",
+    "category": "iso",
+    "format": "iso",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://download.freebsd.org/releases/amd64/amd64/ISO-IMAGES/14.3/FreeBSD-14.3-RELEASE-amd64-dvd1.iso",
+    "min_disk_gb": 8
+  },
+  {
+    "name": "freebsd-14.3-RELEASE-amd64-disc",
+    "display": "FreeBSD 14.3-RELEASE disc1 (amd64)",
+    "description": "FreeBSD 14.3-RELEASE minimal installation ISO",
+    "category": "iso",
+    "format": "iso",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://download.freebsd.org/releases/amd64/amd64/ISO-IMAGES/14.3/FreeBSD-14.3-RELEASE-amd64-disc1.iso",
+    "min_disk_gb": 4
+  },
+  {
+    "name": "freebsd-14.3-RELEASE-amd64-ufs",
+    "display": "FreeBSD 14.3-RELEASE BASIC-CLOUDINIT UFS (amd64)",
+    "description": "FreeBSD 14.3-RELEASE official cloud image with UFS and nuageinit pre-enabled",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://download.freebsd.org/releases/VM-IMAGES/14.3-RELEASE/amd64/Latest/FreeBSD-14.3-RELEASE-amd64-BASIC-CLOUDINIT-ufs.qcow2.xz",
+    "cloud_init": true,
+    "min_disk_gb": 6,
+    "default_user": "freebsd"
+  },
+  {
+    "name": "freebsd-14.3-RELEASE-amd64-zfs",
+    "display": "FreeBSD 14.3-RELEASE BASIC-CLOUDINIT ZFS (amd64)",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://download.freebsd.org/releases/VM-IMAGES/14.3-RELEASE/amd64/Latest/FreeBSD-14.3-RELEASE-amd64-BASIC-CLOUDINIT-zfs.qcow2.xz",
+    "cloud_init": true,
+    "min_disk_gb": 10,
+    "default_user": "freebsd",
+    "description": "FreeBSD 14.3-RELEASE official cloud image with ZFS and nuageinit pre-enabled. Uses NoCloud cloud-init datasource via seed ISO"
+  },
+  {
+    "name": "freebsd-14.3-RELEASE-amd64-raw",
+    "display": "FreeBSD 14.3-RELEASE Cloud RAW (amd64)",
+    "description": "FreeBSD 14.3-RELEASE raw disk image",
+    "category": "cloud",
+    "format": "raw",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://download.freebsd.org/releases/VM-IMAGES/14.3-RELEASE/amd64/Latest/FreeBSD-14.3-RELEASE-amd64.raw.xz",
+    "cloud_init": true,
+    "min_disk_gb": 6,
+    "default_user": "freebsd"
+  },
+  {
+    "name": "debian-12-amd64",
+    "display": "Debian 12 Bookworm (amd64)",
+    "description": "Debian 12 Bookworm cloud image for amd64",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "linux",
+    "os_version": "12",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2",
+    "cloud_init": true,
+    "min_disk_gb": 2,
+    "default_user": "debian"
+  },
+  {
+    "name": "debian-11-amd64",
+    "display": "Debian 11 Bullseye (amd64)",
+    "description": "Debian 11 Bullseye cloud image for amd64",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "linux",
+    "os_version": "11",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2",
+    "cloud_init": true,
+    "min_disk_gb": 2,
+    "default_user": "debian"
+  },
+  {
+    "name": "ubuntu-24.04-amd64",
+    "display": "Ubuntu 24.04 LTS Noble (amd64)",
+    "description": "Ubuntu 24.04 LTS Noble Numbat cloud image",
+    "category": "cloud",
+    "format": "img",
+    "os_type": "linux",
+    "os_version": "24.04",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+    "cloud_init": true,
+    "min_disk_gb": 3,
+    "default_user": "ubuntu"
+  },
+  {
+    "name": "ubuntu-22.04-amd64",
+    "display": "Ubuntu 22.04 LTS Jammy (amd64)",
+    "description": "Ubuntu 22.04 LTS Jammy Jellyfish cloud image",
+    "category": "cloud",
+    "format": "img",
+    "os_type": "linux",
+    "os_version": "22.04",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img",
+    "cloud_init": true,
+    "min_disk_gb": 3,
+    "default_user": "ubuntu"
+  },
+  {
+    "name": "ubuntu-20.04-amd64",
+    "display": "Ubuntu 20.04 LTS Focal (amd64)",
+    "description": "Ubuntu 20.04 LTS Focal Fossa cloud image",
+    "category": "cloud",
+    "format": "img",
+    "os_type": "linux",
+    "os_version": "20.04",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img",
+    "cloud_init": true,
+    "min_disk_gb": 3,
+    "default_user": "ubuntu"
+  },
+  {
+    "name": "alpine-3.20-amd64",
+    "display": "Alpine Linux 3.20 (amd64)",
+    "description": "Alpine Linux 3.20 cloud image - minimal footprint",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "linux",
+    "os_version": "3.20",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/cloud/nocloud_alpine-3.20.0-x86_64-bios-cloudinit-r0.qcow2",
+    "cloud_init": true,
+    "min_disk_gb": 1,
+    "default_user": "alpine"
+  },
+  {
+    "name": "alpine-3.19-amd64",
+    "display": "Alpine Linux 3.19 (amd64)",
+    "description": "Alpine Linux 3.19 cloud image",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "linux",
+    "os_version": "3.19",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/cloud/nocloud_alpine-3.19.0-x86_64-bios-cloudinit-r0.qcow2",
+    "cloud_init": true,
+    "min_disk_gb": 1,
+    "default_user": "alpine"
+  },
+  {
+    "name": "rocky-9-amd64",
+    "display": "Rocky Linux 9 (amd64)",
+    "description": "Rocky Linux 9 cloud image - RHEL compatible",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "linux",
+    "os_version": "9",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2",
+    "cloud_init": true,
+    "min_disk_gb": 10,
+    "default_user": "rocky"
+  },
+  {
+    "name": "almalinux-9-amd64",
+    "display": "AlmaLinux 9 (amd64)",
+    "description": "AlmaLinux 9 cloud image - RHEL compatible",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "linux",
+    "os_version": "9",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2",
+    "cloud_init": true,
+    "min_disk_gb": 10,
+    "default_user": "almalinux"
+  },
+  {
+    "name": "debian-13-netinst-amd64",
+    "display": "Debian 13 netinst (amd64)",
+    "description": "Debian 13 Trixie network installer ISO",
+    "category": "iso",
+    "format": "iso",
+    "os_type": "linux",
+    "os_version": "13",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.6.0-amd64-netinst.iso",
+    "min_disk_gb": 8
+  },
+  {
+    "name": "ubuntu-24.04-live-amd64",
+    "display": "Ubuntu 24.04 LTS Live Server (amd64)",
+    "description": "Ubuntu 24.04 LTS live server installer ISO",
+    "category": "iso",
+    "format": "iso",
+    "os_type": "linux",
+    "os_version": "24.04",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://releases.ubuntu.com/24.04/ubuntu-24.04.4-live-server-amd64.iso",
+    "min_disk_gb": 10
+  },
+  {
+    "name": "openbsd-7.8-amd64",
+    "display": "OpenBSD 7.8 (amd64)",
+    "description": "OpenBSD 7.8 installation ISO",
+    "category": "iso",
+    "format": "iso",
+    "os_type": "openbsd",
+    "os_version": "7.8",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://cdn.openbsd.org/pub/OpenBSD/7.8/amd64/install78.iso",
+    "min_disk_gb": 4
+  },
+  {
+    "name": "netbsd-10.0-amd64",
+    "display": "NetBSD 10.0 (amd64)",
+    "description": "NetBSD 10.0 installation ISO",
+    "category": "iso",
+    "format": "iso",
+    "os_type": "netbsd",
+    "os_version": "10.0",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.0/images/NetBSD-10.0-amd64.iso",
+    "min_disk_gb": 4
+  },
+  {
+    "name": "freebsd-14.3-disc1-amd64",
+    "display": "FreeBSD 14.3-RELEASE Disc1 (amd64)",
+    "description": "FreeBSD 14.3-RELEASE full installation DVD ISO",
+    "category": "iso",
+    "format": "iso",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://download.freebsd.org/releases/amd64/amd64/ISO-IMAGES/14.3/FreeBSD-14.3-RELEASE-amd64-disc1.iso",
+    "min_disk_gb": 8
+  },
+  {
+    "name": "freebsd-14.3-bootonly-amd64",
+    "display": "FreeBSD 14.3-RELEASE Boot Only (amd64)",
+    "description": "FreeBSD 14.3-RELEASE network installer ISO (minimal)",
+    "category": "iso",
+    "format": "iso",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://download.freebsd.org/releases/amd64/amd64/ISO-IMAGES/14.3/FreeBSD-14.3-RELEASE-amd64-bootonly.iso",
+    "min_disk_gb": 8
+  },
+  {
+    "name": "freebsd-15.0-RELEASE-amd64-zfs",
+    "display": "FreeBSD 15.0-RELEASE BASIC-CLOUDINIT ZFS (amd64)",
+    "description": "FreeBSD 15.0-RELEASE official cloud image with ZFS and nuageinit pre-enabled",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "freebsd",
+    "os_version": "15.0-RELEASE",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://download.freebsd.org/releases/VM-IMAGES/15.0-RELEASE/amd64/Latest/FreeBSD-15.0-RELEASE-amd64-BASIC-CLOUDINIT-zfs.qcow2.xz",
+    "cloud_init": true,
+    "min_disk_gb": 10,
+    "default_user": "freebsd"
+  },
+  {
+    "name": "freebsd-15.0-RELEASE-amd64-ufs",
+    "display": "FreeBSD 15.0-RELEASE BASIC-CLOUDINIT UFS (amd64)",
+    "description": "FreeBSD 15.0-RELEASE official cloud image with UFS and nuageinit pre-enabled",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "freebsd",
+    "os_version": "15.0-RELEASE",
+    "arch": "amd64",
+    "providers": [
+      "bhyve",
+      "qemu"
+    ],
+    "url": "https://download.freebsd.org/releases/VM-IMAGES/15.0-RELEASE/amd64/Latest/FreeBSD-15.0-RELEASE-amd64-BASIC-CLOUDINIT-ufs.qcow2.xz",
+    "cloud_init": true,
+    "min_disk_gb": 6,
+    "default_user": "freebsd"
+  },
+  {
+    "name": "freebsd-14.3-RELEASE-arm64-ufs",
+    "display": "FreeBSD 14.3-RELEASE BASIC-CLOUDINIT UFS (arm64)",
+    "description": "FreeBSD 14.3-RELEASE official cloud image with UFS and nuageinit pre-enabled. Runs natively on Apple Silicon",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "arm64",
+    "providers": [
+      "qemu"
+    ],
+    "url": "https://download.freebsd.org/releases/VM-IMAGES/14.3-RELEASE/aarch64/Latest/FreeBSD-14.3-RELEASE-arm64-aarch64-BASIC-CLOUDINIT-ufs.qcow2.xz",
+    "cloud_init": true,
+    "min_disk_gb": 6,
+    "default_user": "freebsd"
+  },
+  {
+    "name": "freebsd-14.3-RELEASE-arm64-zfs",
+    "display": "FreeBSD 14.3-RELEASE BASIC-CLOUDINIT ZFS (arm64)",
+    "description": "FreeBSD 14.3-RELEASE official cloud image with ZFS and nuageinit pre-enabled. Runs natively on Apple Silicon",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "freebsd",
+    "os_version": "14.3-RELEASE",
+    "arch": "arm64",
+    "providers": [
+      "qemu"
+    ],
+    "url": "https://download.freebsd.org/releases/VM-IMAGES/14.3-RELEASE/aarch64/Latest/FreeBSD-14.3-RELEASE-arm64-aarch64-BASIC-CLOUDINIT-zfs.qcow2.xz",
+    "cloud_init": true,
+    "min_disk_gb": 10,
+    "default_user": "freebsd"
+  },
+  {
+    "name": "debian-12-arm64",
+    "display": "Debian 12 Bookworm (arm64)",
+    "description": "Debian 12 Bookworm cloud image for arm64",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "linux",
+    "os_version": "12",
+    "arch": "arm64",
+    "providers": [
+      "qemu"
+    ],
+    "url": "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-arm64.qcow2",
+    "cloud_init": true,
+    "min_disk_gb": 2,
+    "default_user": "debian"
+  },
+  {
+    "name": "ubuntu-24.04-arm64",
+    "display": "Ubuntu 24.04 LTS Noble (arm64)",
+    "description": "Ubuntu 24.04 LTS Noble Numbat cloud image for arm64",
+    "category": "cloud",
+    "format": "img",
+    "os_type": "linux",
+    "os_version": "24.04",
+    "arch": "arm64",
+    "providers": [
+      "qemu"
+    ],
+    "url": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64.img",
+    "cloud_init": true,
+    "min_disk_gb": 3,
+    "default_user": "ubuntu"
+  },
+  {
+    "name": "ubuntu-22.04-arm64",
+    "display": "Ubuntu 22.04 LTS Jammy (arm64)",
+    "description": "Ubuntu 22.04 LTS Jammy Jellyfish cloud image for arm64",
+    "category": "cloud",
+    "format": "img",
+    "os_type": "linux",
+    "os_version": "22.04",
+    "arch": "arm64",
+    "providers": [
+      "qemu"
+    ],
+    "url": "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64.img",
+    "cloud_init": true,
+    "min_disk_gb": 3,
+    "default_user": "ubuntu"
+  },
+  {
+    "name": "alpine-3.20-arm64",
+    "display": "Alpine Linux 3.20 (arm64)",
+    "description": "Alpine Linux 3.20 UEFI cloud image for arm64 - minimal footprint",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "linux",
+    "os_version": "3.20",
+    "arch": "arm64",
+    "providers": [
+      "qemu"
+    ],
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/cloud/nocloud_alpine-3.20.0-aarch64-uefi-cloudinit-r0.qcow2",
+    "cloud_init": true,
+    "min_disk_gb": 1,
+    "default_user": "alpine"
+  },
+  {
+    "name": "almalinux-9-arm64",
+    "display": "AlmaLinux 9 (arm64)",
+    "description": "AlmaLinux 9 cloud image for arm64 - RHEL compatible",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "linux",
+    "os_version": "9",
+    "arch": "arm64",
+    "providers": [
+      "qemu"
+    ],
+    "url": "https://repo.almalinux.org/almalinux/9/cloud/aarch64/images/AlmaLinux-9-GenericCloud-latest.aarch64.qcow2",
+    "cloud_init": true,
+    "min_disk_gb": 10,
+    "default_user": "almalinux"
+  },
+  {
+    "name": "rocky-9-arm64",
+    "display": "Rocky Linux 9 (arm64)",
+    "description": "Rocky Linux 9 cloud image for arm64 - RHEL compatible",
+    "category": "cloud",
+    "format": "qcow2",
+    "os_type": "linux",
+    "os_version": "9",
+    "arch": "arm64",
+    "providers": [
+      "qemu"
+    ],
+    "url": "https://download.rockylinux.org/pub/rocky/9/images/aarch64/Rocky-9-GenericCloud-Base.latest.aarch64.qcow2",
+    "cloud_init": true,
+    "min_disk_gb": 10,
+    "default_user": "rocky"
+  },
+  {
+    "name": "freebsd-15.0-RELEASE-amd64",
+    "display": "FreeBSD 15.0-RELEASE (amd64)",
+    "description": "FreeBSD 15.0-RELEASE base system for amd64",
+    "category": "set",
+    "format": "txz",
+    "os_type": "freebsd",
+    "os_version": "15.0-RELEASE",
+    "arch": "amd64",
+    "providers": [
+      "jail"
+    ],
+    "url": "https://download.freebsd.org/releases/amd64/15.0-RELEASE/base.txz"
+  },
+  {
+    "name": "freebsd-15.0-RELEASE-arm64",
+    "display": "FreeBSD 15.0-RELEASE (arm64)",
+    "description": "FreeBSD 15.0-RELEASE base system for arm64",
+    "category": "set",
+    "format": "txz",
+    "os_type": "freebsd",
+    "os_version": "15.0-RELEASE",
+    "arch": "arm64",
+    "providers": [
+      "jail"
+    ],
+    "url": "https://download.freebsd.org/releases/arm64/aarch64/15.0-RELEASE/base.txz"
+  },
+  {
+    "name": "freebsd-15.0-RELEASE-riscv64",
+    "display": "FreeBSD 15.0-RELEASE (riscv64)",
+    "description": "FreeBSD 15.0-RELEASE base system for RISC-V 64-bit",
+    "category": "set",
+    "format": "txz",
+    "os_type": "freebsd",
+    "os_version": "15.0-RELEASE",
+    "arch": "riscv64",
+    "providers": [
+      "jail"
+    ],
+    "url": "https://download.freebsd.org/releases/riscv/riscv64/15.0-RELEASE/base.txz"
+  }
+]
