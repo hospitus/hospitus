@@ -519,10 +519,21 @@ func (ds *Datastore) UpdateBackupConfig(ctx context.Context, id string, config *
 	return nil
 }
 
-// RenameInstance updates the name (and corresponding id) of an instance.
+// RenameInstance updates the id, name and handle of an instance together.
 // Both the id and the name columns are set to newName because bhyve uses the name
 // as the primary key (the VM directory name).
-func (ds *Datastore) RenameInstance(ctx context.Context, oldName, newName string) error {
+//
+// The handle moves in the same transaction on purpose. It used to be a second
+// call: when it failed, the row had already committed the new id and name while
+// its handle still named the old instance, and every handle-taking operation —
+// delete included, which destroys the dataset the handle names — worked on the
+// wrong one.
+func (ds *Datastore) RenameInstance(ctx context.Context, oldName, newName string, handle provider.InstanceHandle) error {
+	handleJSON, err := json.Marshal(handle)
+	if err != nil {
+		return fmt.Errorf("failed to marshal handle: %w", err)
+	}
+
 	tx, err := ds.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin rename transaction: %w", err)
@@ -537,9 +548,32 @@ func (ds *Datastore) RenameInstance(ctx context.Context, oldName, newName string
 		return fmt.Errorf("failed to defer foreign keys: %w", err)
 	}
 
+	// The spec carries the name too, and it stayed behind: a renamed instance
+	// came back with its top-level name changed and spec.name still the old
+	// one, so anything reading the spec — the provider config the API returns,
+	// a reconfigure — disagreed with the row it came from. Read, amend and
+	// write it inside this transaction, so the two names can never part.
+	var specJSON string
+	if err := tx.QueryRowContext(ctx, `SELECT spec FROM instances WHERE id = ?`, oldName).Scan(&specJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("instance not found: %s", oldName)
+		}
+		return fmt.Errorf("failed to read the spec of %s: %w", oldName, err)
+	}
+
+	var spec provider.InstanceSpec
+	if err := json.Unmarshal([]byte(specJSON), &spec); err != nil {
+		return fmt.Errorf("failed to decode the spec of %s: %w", oldName, err)
+	}
+	spec.Name = newName
+	renamedSpec, err := json.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("failed to encode the renamed spec: %w", err)
+	}
+
 	result, err := tx.ExecContext(ctx,
-		`UPDATE instances SET id = ?, name = ?, updated_at = ? WHERE id = ?`,
-		newName, newName, time.Now(), oldName)
+		`UPDATE instances SET id = ?, name = ?, spec = ?, handle = ?, updated_at = ? WHERE id = ?`,
+		newName, newName, string(renamedSpec), string(handleJSON), time.Now(), oldName)
 	if err != nil {
 		return fmt.Errorf("failed to rename instance: %w", err)
 	}
