@@ -34,19 +34,18 @@ func TestJailProviderCapabilities(t *testing.T) {
 	caps := p.Capabilities()
 
 	// The flags follow the interfaces this provider implements: a handler
-	// reaches a capability by type assertion, so advertising one it does not
-	// implement makes it answer "supported" and then refuse. The instance-level
-	// snapshot, clone and console providers arrive with the jail capabilities.
-	if caps.SupportsSnapshots {
-		t.Error("SupportsSnapshots is set but SnapshotProvider is not implemented")
+	// reaches a capability by type assertion, so a flag without the interface
+	// behind it makes the provider answer "supported" and then refuse.
+	if !caps.SupportsSnapshots {
+		t.Error("SnapshotProvider is implemented but SupportsSnapshots is not set")
 	}
 
-	if caps.SupportsCloning {
-		t.Error("SupportsCloning is set but CloneProvider is not implemented")
+	if !caps.SupportsCloning {
+		t.Error("CloneProvider is implemented but SupportsCloning is not set")
 	}
 
-	if caps.SupportsConsole {
-		t.Error("SupportsConsole is set but ConsoleProvider is not implemented")
+	if !caps.SupportsConsole {
+		t.Error("ConsoleProvider is implemented but SupportsConsole is not set")
 	}
 
 	if caps.SupportsVNC {

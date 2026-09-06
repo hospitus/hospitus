@@ -26,7 +26,14 @@ import (
 	"github.com/hospitus/hospitus/pkg/validation"
 )
 
-var _ provider.InstanceHealthCheckProvider = (*JailProvider)(nil)
+var (
+	_ provider.InstanceHealthCheckProvider = (*JailProvider)(nil)
+	// The capability flags above claim these; the compiler is what keeps the
+	// claim honest.
+	_ provider.SnapshotProvider = (*JailProvider)(nil)
+	_ provider.CloneProvider    = (*JailProvider)(nil)
+	_ provider.ConsoleProvider  = (*JailProvider)(nil)
+)
 
 // JailProvider implements the Provider interface for FreeBSD jails
 type JailProvider struct {
@@ -84,16 +91,15 @@ func (p *JailProvider) Metadata() provider.ProviderMetadata {
 func (p *JailProvider) Capabilities() provider.ProviderCapabilities {
 	return provider.ProviderCapabilities{
 		// A flag follows the interface: a handler reaches a capability by type
-		// assertion, so advertising one the provider does not implement makes
-		// it answer "supported" and then refuse. Snapshots, cloning and the
-		// console are volume-level here; the instance-level SnapshotProvider,
-		// CloneProvider and ConsoleProvider are not implemented.
-		SupportsSnapshots:     false,
+		// assertion, so a flag set without the interface behind it makes the
+		// provider answer "supported" and then refuse. The assertions below
+		// keep the two in step.
+		SupportsSnapshots:     true, // SnapshotProvider, via ZFS
 		SupportsMigration:     false,
 		SupportsLiveMigration: false,
-		SupportsCloning:       false,
+		SupportsCloning:       true, // CloneProvider, via ZFS
 		SupportsPause:         false,
-		SupportsConsole:       false,
+		SupportsConsole:       true, // ConsoleProvider, via jexec
 		SupportsVNC:           false,
 		SupportsSerial:        false,
 
