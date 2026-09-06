@@ -54,8 +54,27 @@ func (p *Parser) ParseFile(path string, vars map[string]any) (*ParsedManifest, e
 	return p.Parse(data, absPath, vars)
 }
 
-// Parse parses TOML manifest data
+// Parse parses TOML manifest data, scoping its secrets to the manifest's own
+// name.
 func (p *Parser) Parse(data []byte, sourcePath string, vars map[string]any) (*ParsedManifest, error) {
+	return p.parse(data, sourcePath, vars, "")
+}
+
+// ParseInScope parses TOML manifest data with the secret scope fixed by the
+// caller rather than taken from the manifest.
+//
+// The scope decides which secrets a {{ secret }} action can read. Deriving it
+// from the manifest is right for a file an operator wrote and owns; it is not
+// right for a manifest arriving over the API, where the sender chooses the
+// name and could therefore name any scope on the host and read what is in it.
+func (p *Parser) ParseInScope(data []byte, sourcePath, scope string, vars map[string]any) (*ParsedManifest, error) {
+	if scope == "" {
+		return nil, fmt.Errorf("a fixed secret scope cannot be empty")
+	}
+	return p.parse(data, sourcePath, vars, scope)
+}
+
+func (p *Parser) parse(data []byte, sourcePath string, vars map[string]any, fixedScope string) (*ParsedManifest, error) {
 	// 1. Detect manifest type first (also enforces the workload/stack exclusivity
 	// rule) using a light textual scan to avoid parsing unrendered templates.
 	manifestType, err := p.detectManifestType(data)
@@ -66,14 +85,17 @@ func (p *Parser) Parse(data []byte, sourcePath string, vars map[string]any) (*Pa
 	// 2. Resolve the final secret scope BEFORE any real render. If the name is
 	// templated, render only to discover it using a no-op store, so no real
 	// secrets are ever generated under a pre-render (wrong) scope name.
-	scope, _ := p.detectName(data, manifestType)
-	if strings.Contains(scope, "{{") {
-		preview, perr := RenderTemplate(data, vars, NewNoopSecretStore(), scope)
-		if perr != nil {
-			return nil, fmt.Errorf("failed to resolve manifest name: %w", perr)
-		}
-		if resolved, _ := p.detectName(preview, manifestType); resolved != "" {
-			scope = resolved
+	scope := fixedScope
+	if scope == "" {
+		scope, _ = p.detectName(data, manifestType)
+		if strings.Contains(scope, "{{") {
+			preview, perr := RenderTemplate(data, vars, NewNoopSecretStore(), scope)
+			if perr != nil {
+				return nil, fmt.Errorf("failed to resolve manifest name: %w", perr)
+			}
+			if resolved, _ := p.detectName(preview, manifestType); resolved != "" {
+				scope = resolved
+			}
 		}
 	}
 

@@ -456,13 +456,20 @@ func parseDurationDefault(s string, def time.Duration) time.Duration {
 	return d
 }
 
+// ErrStackNotFound is returned when a named stack is not deployed.
+//
+// A sentinel, so the API can answer 404 for it: naming a stack that does not
+// exist is the caller's mistake, and every stackManager failure used to reach
+// the client as 500.
+var ErrStackNotFound = errors.New("stack not found")
+
 // StopStack stops all instances in a stack
 func (sm *StackManager) StopStack(ctx context.Context, stackName string) error {
 	sm.mu.RLock()
 	stack, ok := sm.stacks[stackName]
 	if !ok {
 		sm.mu.RUnlock()
-		return fmt.Errorf("stack %s not found", stackName)
+		return fmt.Errorf("stack %s: %w", stackName, ErrStackNotFound)
 	}
 	instances := make([]*StackInstance, len(stack.Instances))
 	copy(instances, stack.Instances)
@@ -530,7 +537,7 @@ func (sm *StackManager) StartStack(ctx context.Context, stackName string) error 
 	stack, ok := sm.stacks[stackName]
 	if !ok {
 		sm.mu.RUnlock()
-		return fmt.Errorf("stack %s not found", stackName)
+		return fmt.Errorf("stack %s: %w", stackName, ErrStackNotFound)
 	}
 	instances := make([]*StackInstance, len(stack.Instances))
 	copy(instances, stack.Instances)
@@ -579,7 +586,7 @@ func (sm *StackManager) DestroyStack(ctx context.Context, stackName string) erro
 	stack, ok := sm.stacks[stackName]
 	if !ok {
 		sm.mu.Unlock()
-		return fmt.Errorf("stack %s not found", stackName)
+		return fmt.Errorf("stack %s: %w", stackName, ErrStackNotFound)
 	}
 	stack.Status = StackStatusDestroying
 	instances := make([]*StackInstance, len(stack.Instances))

@@ -278,3 +278,46 @@ mount_path = "/host"
 		t.Fatalf("stack deploy with a host mount = %d, want 403; body=%s", w.Code, w.Body.String())
 	}
 }
+
+// TestUploadSecretScopeIsPerKey covers which secrets a deployed manifest can
+// reach.
+//
+// Every manifest posted to the API used to render in one scope, and
+// FileSecretStore.Get returns an existing (scope, name) value rather than
+// generating a fresh one — so a deploy-capable key could name another key's
+// secret and receive its value in the configuration it deployed.
+func TestUploadSecretScopeIsPerKey(t *testing.T) {
+	s := &Server{config: &ServerConfig{}, logger: slog.Default()}
+
+	withKey := func(id string) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/stacks", nil)
+		return r.WithContext(context.WithValue(r.Context(), contextKeyAPIKeyID, id))
+	}
+
+	one, ok := s.uploadSecretScope(withKey("key-aaaa1111"))
+	if !ok {
+		t.Fatal("a normal key identifier should name a scope")
+	}
+	two, ok := s.uploadSecretScope(withKey("key-bbbb2222"))
+	if !ok {
+		t.Fatal("a normal key identifier should name a scope")
+	}
+	if one == two {
+		t.Errorf("two keys share the scope %q: either can read the other's secrets", one)
+	}
+
+	// A request with no key at all is the --allow-no-auth daemon, which has one
+	// caller by definition.
+	anon, ok := s.uploadSecretScope(httptest.NewRequest(http.MethodPost, "/api/v1/stacks", nil))
+	if !ok || anon != anonymousUploadSecretScope {
+		t.Errorf("unauthenticated scope = %q, %v; want %q, true", anon, ok, anonymousUploadSecretScope)
+	}
+
+	// A scope is a directory name. An identifier that cannot be one is refused
+	// rather than folded onto a name that might collide with another key's.
+	for _, bad := range []string{"../etc", "a/b", "a\\b", "."} {
+		if got, ok := s.uploadSecretScope(withKey(bad)); ok {
+			t.Errorf("identifier %q produced the scope %q; want it refused", bad, got)
+		}
+	}
+}

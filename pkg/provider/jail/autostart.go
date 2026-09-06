@@ -34,6 +34,13 @@ func (p *JailProvider) SetAutoStart(ctx context.Context, handle provider.Instanc
 		return fmt.Errorf("delay must be non-negative, got %d", config.DelayMS)
 	}
 
+	// Absent priority: the documented default, as bhyve, qemu and podman all
+	// apply. Storing the zero made an enabled jail with no priority sort ahead
+	// of everything at priority 1.
+	if config.Priority == 0 && config.Enabled {
+		config.Priority = 50
+	}
+
 	// Load existing jail configuration
 	// filepath.Join accepts ".."; without this a caller reads or writes JSON
 	// outside the state directory.
