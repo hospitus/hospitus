@@ -1,0 +1,41 @@
+language: en-US
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!go.sum"
+    - "!docs/public/**"
+  path_instructions:
+    - path: "pkg/provider/**"
+      instructions: >-
+        Provider code runs external tools through the execx.Runner returned by
+        p.cmd(), never os/exec directly, except for the streaming, PTY, stdin
+        and env sites that execx does not abstract. Every argument that reaches
+        a jail, ZFS, ifconfig or pfctl command must be validated first. Flag any
+        hardcoded pool name: the ZFS parent always comes from pkg/dataset.
+    - path: "pkg/firewall/**"
+      instructions: >-
+        Hospitus manages only its own PF anchor and never edits the host's
+        /etc/pf.conf. Rule identifiers must be unique per rule, not per
+        instance, or a second rule for the same instance is silently dropped.
+    - path: "internal/api/**"
+      instructions: >-
+        The daemon authenticates on the X-API-Key header only. Keys are
+        bcrypt-hashed and never logged or returned. Handlers reach optional
+        provider capabilities by type assertion and must answer 501 when the
+        assertion fails rather than panicking.
+    - path: "internal/datastore/migrations/**"
+      instructions: >-
+        Migrations are append-only and ordered. Never edit a migration that has
+        shipped; add a new version instead.
+    - path: "**/*_test.go"
+      instructions: >-
+        Tests must not require a FreeBSD host unless they gate on
+        testing.Short() or live under test/integration.

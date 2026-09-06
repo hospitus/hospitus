@@ -1,0 +1,83 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: hospitus
+    main: ./cmd/hospitus-cli
+    binary: hospitus
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - freebsd
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.gitCommit={{.Commit}}
+      - -X main.buildTime={{.Date}}
+
+  # hospitusd is deliberately absent.
+  #
+  # It links go-sqlite3, which needs cgo. Released with CGO_ENABLED=0 it starts,
+  # logs one line, and dies on its first query; a broken binary in a release is
+  # worse than none. Build it on the machine it will run on:
+  #
+  #     git clone https://github.com/hospitus/hospitus && cd hospitus && make build
+  #
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - README.md
+      - LICENSE*
+      - CHANGELOG*
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+      - '^Merge'
+  groups:
+    - title: Features
+      regexp: '^feat'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^fix'
+      order: 1
+    - title: Performance
+      regexp: '^perf'
+      order: 2
+    - title: Security
+      regexp: '^sec'
+      order: 3
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: hospitus
+    name: hospitus
+  prerelease: auto
+  name_template: "Hospitus v{{.Version}}"
