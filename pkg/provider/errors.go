@@ -65,4 +65,15 @@ var (
 	ErrUnsupportedOperation = errors.New("operation not supported")
 	ErrInvalidState         = errors.New("invalid instance state")
 	ErrProviderNotAvailable = errors.New("provider not available")
+
+	// ErrInvalidResourceLimit marks a resource limit the caller got wrong —
+	// an unknown resource, action or amount — as opposed to a provider that
+	// failed to apply a valid one. Handlers answer 400 for it; without the
+	// distinction every rejected value came back as a 500.
+	ErrInvalidResourceLimit = errors.New("invalid resource limit")
+
+	// ErrInvalidVNETConfig marks a VNET configuration the caller got wrong —
+	// a malformed bridge name, address or route — as opposed to a provider
+	// that failed to apply a valid one. Handlers answer 400 for it.
+	ErrInvalidVNETConfig = errors.New("invalid VNET configuration")
 )

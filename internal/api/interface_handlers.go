@@ -6,7 +6,7 @@ import (
 
 	"github.com/hospitus/hospitus/pkg/logging"
 	"github.com/hospitus/hospitus/pkg/provider"
-	"github.com/hospitus/hospitus/pkg/provider/jail"
+	"github.com/hospitus/hospitus/pkg/validation"
 )
 
 // NetworkInterfaceRequest contains parameters for adding a network interface
@@ -77,11 +77,14 @@ func (s *Server) handleInterfaces(w http.ResponseWriter, r *http.Request, instan
 		return
 	}
 
-	jailProv, ok := prov.(*jail.JailProvider)
+	// The capability, not *jail.JailProvider: the concrete type meant anything
+	// wrapping a jail provider — a decorator, a test double — was told 501 for
+	// operations it implements.
+	jailProv, ok := prov.(provider.NetworkInterfaceProvider)
 	if !ok {
 		// The provider does not offer this, which is not a server fault: 500
 		// told the caller to retry something that will never work.
-		s.writeError(w, http.StatusNotImplemented, "Invalid jail provider")
+		s.writeError(w, http.StatusNotImplemented, "Provider does not support network interfaces")
 		return
 	}
 
@@ -94,6 +97,13 @@ func (s *Server) handleInterfaces(w http.ResponseWriter, r *http.Request, instan
 	switch {
 	case len(parts) == 6:
 		interfaceName = parts[5]
+		// Validated here, not only inside the provider: the provider's own
+		// check is what keeps a malformed name away from ifconfig, but its
+		// error came back as a 500 for what is the caller's mistake.
+		if err := validation.ValidateInterfaceName(interfaceName); err != nil {
+			s.writeLoggedError(w, http.StatusBadRequest, "Invalid interface name", err)
+			return
+		}
 	case len(parts) > 6:
 		s.writeError(w, http.StatusNotFound, "Not found")
 		return
@@ -118,7 +128,7 @@ func (s *Server) handleInterfaces(w http.ResponseWriter, r *http.Request, instan
 	}
 }
 
-func (s *Server) handleListInterfaces(w http.ResponseWriter, r *http.Request, jailProv *jail.JailProvider, handle provider.InstanceHandle) {
+func (s *Server) handleListInterfaces(w http.ResponseWriter, r *http.Request, jailProv provider.NetworkInterfaceProvider, handle provider.InstanceHandle) {
 	ctx := r.Context()
 
 	interfaces, err := jailProv.ListNetworkInterfaces(ctx, handle)
@@ -142,7 +152,7 @@ func (s *Server) handleListInterfaces(w http.ResponseWriter, r *http.Request, ja
 	s.writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) handleAddInterface(w http.ResponseWriter, r *http.Request, jailProv *jail.JailProvider, handle provider.InstanceHandle) {
+func (s *Server) handleAddInterface(w http.ResponseWriter, r *http.Request, jailProv provider.NetworkInterfaceProvider, handle provider.InstanceHandle) {
 	ctx := r.Context()
 
 	var req NetworkInterfaceRequest
@@ -155,9 +165,13 @@ func (s *Server) handleAddInterface(w http.ResponseWriter, r *http.Request, jail
 		s.writeError(w, http.StatusBadRequest, "Bridge is required")
 		return
 	}
+	if err := validation.ValidateBridgeName(req.Bridge); err != nil {
+		s.writeLoggedError(w, http.StatusBadRequest, "Invalid bridge name", err)
+		return
+	}
 
-	// Convert request to jail.NetworkInterface
-	iface := jail.NetworkInterface{
+	// Convert the request into the provider's shape
+	iface := provider.NetworkInterface{
 		Name:        req.Name,
 		Bridge:      req.Bridge,
 		IPv4Address: req.IPv4Address,
@@ -186,7 +200,7 @@ func (s *Server) handleAddInterface(w http.ResponseWriter, r *http.Request, jail
 	s.writeJSON(w, http.StatusCreated, networkInterfaceToInfo(*result))
 }
 
-func (s *Server) handleRemoveInterface(w http.ResponseWriter, r *http.Request, jailProv *jail.JailProvider, handle provider.InstanceHandle, interfaceName string) {
+func (s *Server) handleRemoveInterface(w http.ResponseWriter, r *http.Request, jailProv provider.NetworkInterfaceProvider, handle provider.InstanceHandle, interfaceName string) {
 	ctx := r.Context()
 
 	if err := jailProv.RemoveNetworkInterface(ctx, handle, interfaceName); err != nil {
@@ -198,8 +212,8 @@ func (s *Server) handleRemoveInterface(w http.ResponseWriter, r *http.Request, j
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// networkInterfaceToInfo converts jail.NetworkInterface to NetworkInterfaceInfo
-func networkInterfaceToInfo(iface jail.NetworkInterface) NetworkInterfaceInfo {
+// networkInterfaceToInfo converts provider.NetworkInterface to NetworkInterfaceInfo
+func networkInterfaceToInfo(iface provider.NetworkInterface) NetworkInterfaceInfo {
 	return NetworkInterfaceInfo{
 		Name:          iface.Name,
 		Bridge:        iface.Bridge,

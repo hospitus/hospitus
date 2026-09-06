@@ -1,11 +1,14 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/hospitus/hospitus/pkg/provider"
 	"github.com/hospitus/hospitus/pkg/provider/jail"
 	"github.com/hospitus/hospitus/pkg/storage"
 	"github.com/hospitus/hospitus/pkg/validation"
@@ -97,6 +100,27 @@ func (s *Server) handleVolumes(w http.ResponseWriter, r *http.Request) {
 			s.writeError(w, http.StatusBadRequest, "description too long (max 1024 characters)")
 			return
 		}
+		// The sizes and the compression too. These travel to zfs unchanged, so
+		// "10 gigs" or "zstd-99" came back as a 500 for what the caller wrote.
+		for _, sized := range []struct{ field, value string }{
+			{"size", req.Size},
+			{"quota", req.Quota},
+			{"reservation", req.Reservation},
+		} {
+			if sized.value == "" {
+				continue
+			}
+			if !zfsSizePattern.MatchString(sized.value) {
+				s.writeError(w, http.StatusBadRequest, fmt.Sprintf(
+					"%s %q is not a ZFS size (e.g. 10G, 512M, 1T)", sized.field, sized.value))
+				return
+			}
+		}
+		if req.Compression != "" && !validation.ValidZFSCompression(req.Compression) {
+			s.writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"compression %q is not a ZFS compression algorithm", req.Compression))
+			return
+		}
 
 		vol, err := s.storage.CreateVolume(ctx, req.Name, createOptionsFromRequest(req))
 		if err != nil {
@@ -107,7 +131,7 @@ func (s *Server) handleVolumes(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, http.StatusCreated, storageVolumeToInfo(*vol))
 
 	default:
-		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		s.writeMethodNotAllowed(w, http.MethodGet, http.MethodPost)
 	}
 }
 
@@ -165,8 +189,12 @@ func (s *Server) handleVolumeDetail(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Extract volume name from path
+	// Exactly four. "/api/v1/volumes/" is registered as a prefix, so it also
+	// matches deeper paths: with ">= 4", a DELETE to /volumes/data/snapshots
+	// resolved to the volume "data" and destroyed it — recursively, when the
+	// request carried force=true.
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) < 4 {
+	if len(parts) != 4 {
 		s.writeError(w, http.StatusBadRequest, "Invalid path")
 		return
 	}
@@ -209,7 +237,7 @@ func (s *Server) handleVolumeDetail(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
-		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		s.writeMethodNotAllowed(w, http.MethodGet, http.MethodDelete)
 	}
 }
 
@@ -243,17 +271,30 @@ func (s *Server) handleInstanceVolumes(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 
-	jailProv, ok := prov.(*jail.JailProvider)
+	// The capability interface, not *jail.JailProvider: the concrete type meant
+	// anything wrapping a jail provider — a decorator, a test double — was told
+	// 501 for volume operations it implements. handleFreeBSD reaches rctl and
+	// VNET the same way.
+	jailProv, ok := prov.(provider.NamedVolumeProvider)
 	if !ok {
 		// The provider does not offer this, which is not a server fault: 500
 		// told the caller to retry something that will never work.
-		s.writeError(w, http.StatusNotImplemented, "Invalid jail provider")
+		s.writeError(w, http.StatusNotImplemented, "Provider does not support named volumes")
 		return
 	}
 
 	// parts is the route suffix passed by handleInstanceDetail, i.e.
 	// ["volumes"] or ["volumes", "{volume}"] — not the full path. The volume
 	// name (when present) is therefore at index 1, matching handleInstanceBackups.
+	// Checked before dispatch, not only in volumeNameFromParts: that helper
+	// answers "" for a surplus path, which the switch below then reads as the
+	// collection — so GET .../volumes/data/extra listed the volumes and
+	// answered 200 for a route that does not exist.
+	if len(parts) != 1 && len(parts) != 2 {
+		s.writeError(w, http.StatusNotFound, "Not found")
+		return
+	}
+
 	volumeName := volumeNameFromParts(parts)
 	if volumeName != "" {
 		if err := validation.ValidateInstanceName(volumeName); err != nil {
@@ -321,7 +362,13 @@ func (s *Server) handleInstanceVolumes(w http.ResponseWriter, r *http.Request, i
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
-		s.writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		// Which methods depend on the path: the collection lists, a named
+		// volume attaches and detaches.
+		if volumeName == "" {
+			s.writeMethodNotAllowed(w, http.MethodGet)
+		} else {
+			s.writeMethodNotAllowed(w, http.MethodPost, http.MethodDelete)
+		}
 	}
 }
 
@@ -362,10 +409,13 @@ func storageVolumeToInfo(vol storage.Volume) VolumeInfo {
 // handleInstanceDetail (["volumes"] or ["volumes", "{volume}"]). It returns ""
 // when no volume segment is present.
 func volumeNameFromParts(parts []string) string {
-	if len(parts) >= 2 {
-		return parts[1]
+	// Exactly two: ">= 2" ignored whatever followed, so a DELETE to
+	// .../volumes/data/extra detached the volume "data" for a route that does
+	// not exist. A surplus path now names no volume and falls to the 405.
+	if len(parts) < 2 || len(parts) > 2 {
+		return ""
 	}
-	return ""
+	return parts[1]
 }
 
 // parseVolumeSize reads a ZFS byte count. A property ZFS reports as "none" or
@@ -377,3 +427,11 @@ func parseVolumeSize(value string) int64 {
 	}
 	return size
 }
+
+// zfsSizePattern is the whole grammar a size property may use: a number,
+// optionally fractional, with an optional unit suffix.
+//
+// Case-insensitive, with an optional B: ZFS documents them that way, and an
+// uppercase-only class refused "10g" and "10GB" — values zfs itself accepts.
+// Not "iB", which is not part of the documented grammar.
+var zfsSizePattern = regexp.MustCompile(`^\d+(\.\d+)?([KMGTPEkmgtpe][Bb]?)?$`)

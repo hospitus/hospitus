@@ -11,15 +11,10 @@ import (
 	"github.com/hospitus/hospitus/pkg/validation"
 )
 
-// VNETConfig represents VNET configuration for a jail.
-type VNETConfig struct {
-	Enabled      bool     `json:"enabled"`       // Enable VNET
-	Interfaces   []string `json:"interfaces"`    // Network interfaces to add to jail
-	Bridge       string   `json:"bridge"`        // Bridge to attach epair to
-	IPv4Address  string   `json:"ipv4_address"`  // IPv4 address for jail interface
-	IPv6Address  string   `json:"ipv6_address"`  // IPv6 address for jail interface
-	DefaultRoute string   `json:"default_route"` // Default gateway
-}
+// VNETConfig is an alias: the type moved to pkg/provider so the API can reach
+// VNET through the VNETProvider interface instead of the concrete
+// *JailProvider.
+type VNETConfig = provider.VNETConfig
 
 // EnableVNET enables VNET (virtual network stack) for a jail.
 //
@@ -56,27 +51,36 @@ func (p *JailProvider) EnableVNET(ctx context.Context, handle provider.InstanceH
 	// SECURITY: Validate all user-supplied VNET config fields before passing to system commands
 	if config.Bridge != "" {
 		if err := validation.ValidateBridgeName(config.Bridge); err != nil {
-			return fmt.Errorf("invalid bridge name: %w", err)
+			return fmt.Errorf("%w: bridge name: %w", provider.ErrInvalidVNETConfig, err)
 		}
 	}
 	if config.IPv4Address != "" && config.IPv4Address != "dhcp" {
 		if err := validation.ValidateIPAddress(config.IPv4Address); err != nil {
-			return fmt.Errorf("invalid IPv4 address: %w", err)
+			return fmt.Errorf("%w: IPv4 address: %w", provider.ErrInvalidVNETConfig, err)
 		}
 	}
 	if config.IPv6Address != "" {
 		if err := validation.ValidateIPAddress(config.IPv6Address); err != nil {
-			return fmt.Errorf("invalid IPv6 address: %w", err)
+			return fmt.Errorf("%w: IPv6 address: %w", provider.ErrInvalidVNETConfig, err)
 		}
 	}
 	if config.DefaultRoute != "" {
 		if err := validation.ValidateIPAddress(config.DefaultRoute); err != nil {
-			return fmt.Errorf("invalid default route: %w", err)
+			return fmt.Errorf("%w: default route: %w", provider.ErrInvalidVNETConfig, err)
 		}
 	}
 
 	if !config.Enabled {
 		return nil // Nothing to do
+	}
+
+	// Refused here, before refuseAddressInUse and before any epair or host
+	// change: this check used to sit past the point where the epair had been
+	// created, so a request that was always going to be rejected still
+	// modified the host and then undid it.
+	if config.IPv4Address == "dhcp" {
+		return fmt.Errorf("%w: EnableVNET needs a static address; %q is resolved when the jail starts",
+			provider.ErrInvalidVNETConfig, config.IPv4Address)
 	}
 
 	// The address goes through the same bookkeeping a start does: this entry
@@ -146,7 +150,8 @@ func (p *JailProvider) EnableVNET(ctx context.Context, handle provider.InstanceH
 	// a lease is obtained by the start path, which allocates one first.
 	if config.IPv4Address == "dhcp" {
 		destroyEpair()
-		return fmt.Errorf("EnableVNET needs a static address; %q is resolved when the jail starts", config.IPv4Address)
+		return fmt.Errorf("%w: EnableVNET needs a static address; %q is resolved when the jail starts",
+			provider.ErrInvalidVNETConfig, config.IPv4Address)
 	}
 	if config.IPv4Address != "" {
 		// Use jexec to configure interface inside jail

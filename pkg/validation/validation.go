@@ -247,6 +247,24 @@ func ValidateIPAddress(ip string) error {
 	return nil
 }
 
+// validServiceName matches an rc.d script name: sysrc builds "<name>_enable"
+// and splits its argument on the first "=", so a name carrying one — say
+// "sshd_enable=NO" — sets a different variable than the one asked for.
+var validServiceName = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]{0,63}$`)
+
+// ValidateServiceName reports whether name can be an rc.d service.
+//
+// Shared with the jail provider rather than written twice: the provider's own
+// check is what keeps a malformed name away from service(8), but the handlers
+// need it too — reaching the provider for a name like "bad!" turned the
+// caller's mistake into a 500.
+func ValidateServiceName(name string) error {
+	if !validServiceName.MatchString(name) {
+		return fmt.Errorf("invalid service name %q: expected a plain rc.d script name", name)
+	}
+	return nil
+}
+
 // ValidateJailParameter validates a jail parameter key.
 //
 // Only whitelisted parameters are allowed to prevent command injection.

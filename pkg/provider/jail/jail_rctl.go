@@ -3,11 +3,13 @@ package jail
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
+	"regexp"
 	"strconv"
 	"strings"
-	"unicode/utf8"
+	"sync"
+	"time"
 
-	"github.com/hospitus/hospitus/pkg/logging"
 	"github.com/hospitus/hospitus/pkg/provider"
 	"github.com/hospitus/hospitus/pkg/validation"
 )
@@ -20,12 +22,10 @@ import (
 //
 // Note: RCTL requires kern.racct.enable=1 in /boot/loader.conf
 
-// ResourceLimit represents a FreeBSD rctl resource limit rule.
-type ResourceLimit struct {
-	Resource string `json:"resource"` // e.g., "memoryuse", "cputime", "maxproc"
-	Action   string `json:"action"`   // e.g., "deny", "log", "devctl"
-	Amount   string `json:"amount"`   // e.g., "2G", "3600", "100"
-}
+// ResourceLimit is an alias: the type moved to pkg/provider so the API can
+// reach rctl through the RctlProvider interface instead of the concrete
+// *JailProvider.
+type ResourceLimit = provider.ResourceLimit
 
 // applyRCTLLimits applies resource limits to a jail using RCTL.
 // This is called during jail startup to apply CPU and memory limits.
@@ -52,18 +52,54 @@ func (p *JailProvider) applyRCTLLimits(ctx context.Context, name string, resourc
 		return fmt.Errorf("RACCT/RCTL is not enabled; resource limits cannot be applied to jail %q — add kern.racct.enable=1 to /boot/loader.conf and reboot", name)
 	}
 
+	// The same lock SetResourceLimits takes, held across the removal and every
+	// addition below: this path — the one start and SetInstanceResources take —
+	// is the other rctl mutation for a jail, and the two interleaved freely.
+	lock := rctlLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+
+	handle := provider.InstanceHandle{ID: name}
+
+	// Read before replacing, and refuse without a snapshot: the same rule
+	// SetResourceLimits follows. Without it a failure halfway through leaves
+	// the jail holding part of the new set and none of the old, with no way
+	// back.
+	previous, err := p.getResourceLimitsLocked(ctx, handle)
+	if err != nil {
+		return fmt.Errorf("refusing to apply the RCTL limits: the existing rules could not be read, so a failure could not be undone: %w", err)
+	}
+
 	// rctl keeps every matching rule, so adding a looser one leaves the earlier,
 	// stricter rule in force. ApplyResourceLimits already clears first; this
 	// path — the one start and SetInstanceResources take — did not.
-	if err := p.RemoveResourceLimits(ctx, provider.InstanceHandle{ID: name}); err != nil {
-		p.logWarn(ctx, "failed to remove existing RCTL rules before applying new ones", "jail", name, logging.FieldError, err)
+	//
+	// A failed removal is fatal: RemoveResourceLimits answers nil when there is
+	// nothing to remove, so an error means the old rules may still be in force,
+	// and adding the new ones on top of them reports a success nobody asked for.
+	if err := p.removeResourceLimitsLocked(ctx, handle); err != nil {
+		return fmt.Errorf("failed to remove the existing RCTL rules: %w", err)
+	}
+
+	// Every addition goes through this, so a failure part-way puts the jail
+	// back the way it was rather than leaving it with a fragment of both sets.
+	add := func(rule, what string) error {
+		if err := p.cmd().Run(ctx, "rctl", "-a", rule); err != nil {
+			// A canceled request is one way the command above failed, and the
+			// rollback runs rctl too.
+			rollbackCtx, cancelRollback := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+			defer cancelRollback()
+			p.restoreResourceLimits(rollbackCtx, handle, previous)
+			return fmt.Errorf("failed to set %s: %w", what, err)
+		}
+		return nil
 	}
 
 	// CPU limit (percentage)
 	if resources.CPUs > 0 {
 		limit := fmt.Sprintf("jail:%s:pcpu:deny=%d", name, resources.CPUs*100)
-		if err := p.cmd().Run(ctx, "rctl", "-a", limit); err != nil {
-			return fmt.Errorf("failed to set CPU limit: %w", err)
+		if err := add(limit, "CPU limit"); err != nil {
+			return err
 		}
 	}
 
@@ -71,34 +107,34 @@ func (p *JailProvider) applyRCTLLimits(ctx context.Context, name string, resourc
 	if resources.MemoryMB > 0 {
 		bytes := resources.MemoryMB * 1024 * 1024
 		limit := fmt.Sprintf("jail:%s:memoryuse:deny=%d", name, bytes)
-		if err := p.cmd().Run(ctx, "rctl", "-a", limit); err != nil {
-			return fmt.Errorf("failed to set memory limit: %w", err)
+		if err := add(limit, "memory limit"); err != nil {
+			return err
 		}
 	}
 
 	// I/O limits — hard failures (user-configured limits must be applied)
 	if resources.ReadBPS > 0 {
 		limit := fmt.Sprintf("jail:%s:readbps:throttle=%d", name, resources.ReadBPS)
-		if err := p.cmd().Run(ctx, "rctl", "-a", limit); err != nil {
-			return fmt.Errorf("failed to set read BPS limit: %w", err)
+		if err := add(limit, "read BPS limit"); err != nil {
+			return err
 		}
 	}
 	if resources.WriteBPS > 0 {
 		limit := fmt.Sprintf("jail:%s:writebps:throttle=%d", name, resources.WriteBPS)
-		if err := p.cmd().Run(ctx, "rctl", "-a", limit); err != nil {
-			return fmt.Errorf("failed to set write BPS limit: %w", err)
+		if err := add(limit, "write BPS limit"); err != nil {
+			return err
 		}
 	}
 	if resources.ReadIOPS > 0 {
 		limit := fmt.Sprintf("jail:%s:readiops:throttle=%d", name, resources.ReadIOPS)
-		if err := p.cmd().Run(ctx, "rctl", "-a", limit); err != nil {
-			return fmt.Errorf("failed to set read IOPS limit: %w", err)
+		if err := add(limit, "read IOPS limit"); err != nil {
+			return err
 		}
 	}
 	if resources.WriteIOPS > 0 {
 		limit := fmt.Sprintf("jail:%s:writeiops:throttle=%d", name, resources.WriteIOPS)
-		if err := p.cmd().Run(ctx, "rctl", "-a", limit); err != nil {
-			return fmt.Errorf("failed to set write IOPS limit: %w", err)
+		if err := add(limit, "write IOPS limit"); err != nil {
+			return err
 		}
 	}
 
@@ -108,11 +144,123 @@ func (p *JailProvider) applyRCTLLimits(ctx context.Context, name string, resourc
 		processLimit = strconv.Itoa(resources.MaxProc)
 	}
 	limit := fmt.Sprintf("jail:%s:maxproc:deny=%s", name, processLimit)
-	if err := p.cmd().Run(ctx, "rctl", "-a", limit); err != nil {
-		return fmt.Errorf("failed to set maxproc limit: %w", err)
+	if err := add(limit, "maxproc limit"); err != nil {
+		return err
 	}
 
 	return nil
+}
+
+// rctlAmountPattern is the whole grammar an rctl amount may use: a whole
+// number with an optional unit.
+//
+// rctl(8) hands byte amounts to expand_number(3), which documents "a decimal
+// number ... optionally followed ... by a suffix indicating a power-of-two
+// multiplier" — K, M, G, T, P, E, in either case, and no fraction. pcpu is
+// "in percents of a single CPU core", a bare number rather than a percent
+// sign. So "1.5G" and "50%" were accepted here and refused by rctl, turning a
+// caller's mistake into a provider error where it is a 400.
+var rctlAmountPattern = regexp.MustCompile(`^\d+[KMGTPEkmgtpe]?$`)
+
+// rctlLocks serializes a whole rctl replacement per jail.
+//
+// SetResourceLimits reads the current rules, removes them, then adds the new
+// ones. Two calls for the same jail interleaved freely: one could remove the
+// rules the other had just added, or roll back over them, and both reported
+// success. There is no existing per-instance lock in this provider — createMu
+// and dhcpMu guard other things — so the replacement gets its own.
+//
+// A fixed array rather than a map keyed by jail name: the names come from the
+// API, and a map would grow with them.
+var rctlLocks [32]sync.Mutex
+
+func rctlLock(jailName string) *sync.Mutex {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(jailName))
+	return &rctlLocks[h.Sum32()%uint32(len(rctlLocks))]
+}
+
+// validateRCTLAmount reports whether an amount may be interpolated into an
+// rctl rule. Named rather than inline so the tests can exercise the rule that
+// ships: the test file carried its own copy, which checked the length and some
+// shell metacharacters but never the grammar.
+func validateRCTLAmount(amount string) error {
+	if len(amount) > 20 {
+		return fmt.Errorf("invalid amount: too long (max 20 characters)")
+	}
+	if !rctlAmountPattern.MatchString(amount) {
+		return fmt.Errorf("invalid amount %q: expected a whole number with an optional unit suffix, e.g. 2G, 512M or 3600", amount)
+	}
+	// The suffix is a power-of-two multiplier, and expand_number(3) answers
+	// ERANGE when the product does not fit a uint64: "16E" is well-formed and
+	// refused by rctl, which made a caller's mistake a 500.
+	if _, err := expandRCTLAmount(amount); err != nil {
+		return err
+	}
+	return nil
+}
+
+// expandRCTLAmount applies the unit suffix the way expand_number(3) does, and
+// reports the overflow it reports.
+func expandRCTLAmount(amount string) (uint64, error) {
+	shift := uint(0)
+	digits := amount
+	switch last := amount[len(amount)-1]; last {
+	case 'K', 'k':
+		shift = 10
+	case 'M', 'm':
+		shift = 20
+	case 'G', 'g':
+		shift = 30
+	case 'T', 't':
+		shift = 40
+	case 'P', 'p':
+		shift = 50
+	case 'E', 'e':
+		shift = 60
+	}
+	if shift > 0 {
+		digits = amount[:len(amount)-1]
+	}
+
+	n, err := strconv.ParseUint(digits, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("amount %q does not fit a 64-bit count", amount)
+	}
+	if shift > 0 && n > (^uint64(0))>>shift {
+		return 0, fmt.Errorf("amount %q overflows once its unit suffix is applied", amount)
+	}
+	return n << shift, nil
+}
+
+// restoreResourceLimits puts back the rules a failed replacement removed.
+// The caller holds the jail's lock; this uses the unlocked helpers.
+//
+// The partial replacement is cleared first. Re-adding the old rules on top of
+// it left the jail holding both sets — the rules it had and the ones that had
+// been applied before the failure — which is neither state the caller asked
+// for. SetResourceLimits refuses to start without a snapshot, so there is
+// always something to put back here.
+//
+// A restore that itself fails is logged rather than swallowed: the jail is
+// then running with no limits, which the operator needs to know.
+func (p *JailProvider) restoreResourceLimits(ctx context.Context, handle provider.InstanceHandle, previous []ResourceLimit) {
+	if err := p.removeResourceLimitsLocked(ctx, handle); err != nil {
+		// Adding the old rules on top of a partial set that could not be
+		// cleared leaves the jail with neither the set it had nor the one that
+		// was asked for. Stopping leaves the partial set, which is at least
+		// one coherent thing, and says so.
+		p.logWarn(ctx, "the partial RCTL replacement could not be cleared, so the old rules were not restored: the jail holds neither set",
+			"jail", handle.ID, "err", err)
+		return
+	}
+	for _, limit := range previous {
+		rule := fmt.Sprintf("jail:%s:%s:%s=%s", handle.ID, limit.Resource, limit.Action, limit.Amount)
+		if output, err := p.cmd().CombinedOutput(ctx, "rctl", "-a", rule); err != nil {
+			p.logWarn(ctx, "could not restore an RCTL rule after a failed replacement",
+				"jail", handle.ID, "rule", rule, "err", err, "output", string(output))
+		}
+	}
 }
 
 // SetResourceLimits sets resource limits on a jail using FreeBSD rctl.
@@ -150,41 +298,72 @@ func (p *JailProvider) SetResourceLimits(ctx context.Context, handle provider.In
 		return fmt.Errorf("jail not found: %w", err)
 	}
 
-	// Remove existing rules first
-	if err := p.RemoveResourceLimits(ctx, handle); err != nil {
-		// Log but don't fail if no rules exist
-		p.logWarn(ctx, "failed to remove existing RCTL rules before applying new ones", "jail", handle.ID, "err", err)
+	// Everything is validated before anything is removed. Validation used to
+	// sit inside the add loop, after the removal: a bad resource, action or
+	// amount in the second entry left the jail with the first new rule and
+	// none of its old ones — or, if it was the first entry, with no limits at
+	// all.
+	//
+	// SECURITY: the amount is interpolated into a colon-separated,
+	// equals-terminated rule grammar, so what it may contain is spelled out
+	// rather than what it may not. The old blacklist named shell
+	// metacharacters — which rctl never sees, there being no shell — and let
+	// ":" and "=" through: "2G:pcpu:deny=100" defined a second rule nobody
+	// asked for.
+	for _, limit := range limits {
+		if !isValidRctlResource(limit.Resource) {
+			return fmt.Errorf("%w: unknown resource %q", provider.ErrInvalidResourceLimit, limit.Resource)
+		}
+		if !isValidRctlAction(limit.Action) {
+			return fmt.Errorf("%w: unknown action %q", provider.ErrInvalidResourceLimit, limit.Action)
+		}
+		if err := validateRCTLAmount(limit.Amount); err != nil {
+			return fmt.Errorf("%w: %w", provider.ErrInvalidResourceLimit, err)
+		}
+		if err := rctlCombinationError(limit.Resource, limit.Action); err != nil {
+			return err
+		}
+	}
+
+	// Read the rules back before replacing them, so a failed add can put them
+	// there again. A failure halfway through used to return with the jail
+	// holding neither the old set nor the new one.
+	// Held across the snapshot, the removal, every addition and the rollback:
+	// anything less lets a second call for this jail interleave with this one.
+	lock := rctlLock(handle.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Refused rather than logged: removing the rules without a snapshot means
+	// a failure halfway through leaves the jail unlimited with no way back.
+	// Not replacing them at all is the safer answer.
+	previous, err := p.getResourceLimitsLocked(ctx, handle)
+	if err != nil {
+		return fmt.Errorf("refusing to replace the RCTL rules: the existing ones could not be read, so a failure could not be undone: %w", err)
+	}
+
+	// Removal failing is fatal to the replacement: RemoveResourceLimits already
+	// answers nil when there is nothing to remove, so any error left means the
+	// old rules may still be in force — and adding the new ones on top of them
+	// and reporting success is the one outcome nobody asked for.
+	if err := p.removeResourceLimitsLocked(ctx, handle); err != nil {
+		return fmt.Errorf("failed to remove the existing RCTL rules: %w", err)
 	}
 
 	// Add each limit rule
 	for _, limit := range limits {
-		// SECURITY: Validate resource name
-		if !isValidRctlResource(limit.Resource) {
-			return fmt.Errorf("invalid resource: %s", limit.Resource)
-		}
-		if !isValidRctlAction(limit.Action) {
-			return fmt.Errorf("invalid action: %s", limit.Action)
-		}
-
-		// SECURITY: Validate amount to prevent rule injection.
-		// RCTL amounts are numeric with optional suffix (G, M, K, %).
-		// Reject newlines, null bytes, or shell metacharacters.
-		if !utf8.ValidString(limit.Amount) {
-			return fmt.Errorf("invalid amount: must be valid UTF-8")
-		}
-		if strings.ContainsAny(limit.Amount, "\x00\r\n;&|$`(){}[]<>\\\"'") {
-			return fmt.Errorf("invalid amount: contains invalid characters")
-		}
-		if len(limit.Amount) > 20 {
-			return fmt.Errorf("invalid amount: too long (max 20 characters)")
-		}
-
 		// Build rctl rule: jail:jailname:resource:action=amount
 		rule := fmt.Sprintf("jail:%s:%s:%s=%s", handle.ID, limit.Resource, limit.Action, limit.Amount)
 
 		// Add rule using rctl -a
 		output, err := p.cmd().CombinedOutput(ctx, "rctl", "-a", rule)
 		if err != nil {
+			// A canceled request is one way the command above failed, and the
+			// rollback runs rctl too: on the same context it would fail at
+			// once, leaving the partial set in place.
+			rollbackCtx, cancelRollback := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+			p.restoreResourceLimits(rollbackCtx, handle, previous)
+			cancelRollback()
 			return fmt.Errorf("failed to add rctl rule %s: %w (output: %s)", rule, err, string(output))
 		}
 	}
@@ -193,7 +372,22 @@ func (p *JailProvider) SetResourceLimits(ctx context.Context, handle provider.In
 }
 
 // GetResourceLimits retrieves current resource limits for a jail.
+//
+// Takes the same lock the replacement paths hold, so a read cannot observe a
+// jail midway through one — between the removal and the additions it has no
+// rules at all, and that state used to be reportable.
 func (p *JailProvider) GetResourceLimits(ctx context.Context, handle provider.InstanceHandle) ([]ResourceLimit, error) {
+	lock := rctlLock(handle.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	return p.getResourceLimitsLocked(ctx, handle)
+}
+
+// getResourceLimitsLocked is GetResourceLimits for a caller that already holds
+// the jail's lock. Go mutexes are not reentrant, so the replacement paths must
+// call this one.
+func (p *JailProvider) getResourceLimitsLocked(ctx context.Context, handle provider.InstanceHandle) ([]ResourceLimit, error) {
 	// SECURITY: Validate handle
 	if err := validation.ValidateInstanceName(handle.ID); err != nil {
 		return nil, fmt.Errorf("invalid instance handle: %w", err)
@@ -247,7 +441,21 @@ func (p *JailProvider) GetResourceLimits(ctx context.Context, handle provider.In
 }
 
 // RemoveResourceLimits removes all resource limits from a jail.
+//
+// Takes the jail's lock: a DELETE arriving during a replacement used to clear
+// the rules the replacement had just added, which then returned success with
+// only part of its set in force.
 func (p *JailProvider) RemoveResourceLimits(ctx context.Context, handle provider.InstanceHandle) error {
+	lock := rctlLock(handle.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	return p.removeResourceLimitsLocked(ctx, handle)
+}
+
+// removeResourceLimitsLocked is RemoveResourceLimits for a caller that already
+// holds the jail's lock.
+func (p *JailProvider) removeResourceLimitsLocked(ctx context.Context, handle provider.InstanceHandle) error {
 	// SECURITY: Validate handle
 	if err := validation.ValidateInstanceName(handle.ID); err != nil {
 		return fmt.Errorf("invalid instance handle: %w", err)
@@ -307,9 +515,52 @@ func isValidRctlAction(action string) bool {
 		"throttle": // Slow the process down — applyRCTLLimits creates these
 		return true
 	}
-	// rctl(8) needs a signal name after "sig": bare "sig" is not a rule it
-	// accepts, while "sigterm", "sigkill" and the rest are.
-	return strings.HasPrefix(action, "sig") && len(action) > len("sig")
+	// An allowlist, not a "sig" prefix: "sigbogus" satisfied the prefix and was
+	// refused by rctl, turning a caller's typo into a 500. These are the
+	// signals rctl(8) names.
+	// Every signal signal(3) names, which is what rctl(8) points at for "sig*".
+	// The first list here was written from the common signals and left out
+	// sigchld, sigemt, siginfo, sigio, sigprof, sigthr and sigwinch — refusing
+	// rules rctl accepts, which is the opposite mistake from the "sig" prefix
+	// it replaced. Not siglibrt: it is in neither action table.
+	switch action {
+	case "sigabrt", "sigalrm", "sigbus", "sigchld", "sigcont", "sigemt", "sigfpe",
+		"sighup", "sigill", "siginfo", "sigint", "sigio", "sigkill", "sigpipe",
+		"sigprof", "sigquit", "sigsegv", "sigstop", "sigsys", "sigterm", "sigthr",
+		"sigtrap", "sigtstp", "sigttin", "sigttou", "sigurg", "sigusr1", "sigusr2",
+		"sigvtalrm", "sigwinch", "sigxcpu", "sigxfsz":
+		return true
+	}
+	return false
+}
+
+// rctlCombinationError reports why rctl(8) will not take this resource with
+// this action, or nil when it will.
+//
+// The two allowlists are independent, so a pair each half accepts can still be
+// one rctl refuses: "cputime:deny" passed both and was rejected by rctl, after
+// the replacement had already removed the jail's existing rules.
+func rctlCombinationError(resource, action string) error {
+	// rctl(8): deny is "not supported for cputime, wallclock, readbps,
+	// writebps, readiops, and writeiops".
+	if action == "deny" {
+		switch resource {
+		case "cputime", "wallclock", "readbps", "writebps", "readiops", "writeiops":
+			return fmt.Errorf("%w: rctl does not deny %q; use log, devctl or a signal",
+				provider.ErrInvalidResourceLimit, resource)
+		}
+	}
+	// rctl(8): throttle is "only supported for readbps, writebps, readiops and
+	// writeiops".
+	if action == "throttle" {
+		switch resource {
+		case "readbps", "writebps", "readiops", "writeiops":
+		default:
+			return fmt.Errorf("%w: rctl only throttles readbps, writebps, readiops and writeiops, not %q",
+				provider.ErrInvalidResourceLimit, resource)
+		}
+	}
+	return nil
 }
 
 // SetCPUPriority sets the CPU scheduling priority (nice value) for all processes in a jail.
@@ -438,3 +689,11 @@ func (p *JailProvider) GetCPUPriority(ctx context.Context, handle provider.Insta
 
 	return nice, nil
 }
+
+// The API reaches rctl and VNET through these interfaces, not through
+// *JailProvider. Asserted here so a signature change breaks the build rather
+// than turning a live endpoint into 501.
+var (
+	_ provider.RctlProvider = (*JailProvider)(nil)
+	_ provider.VNETProvider = (*JailProvider)(nil)
+)

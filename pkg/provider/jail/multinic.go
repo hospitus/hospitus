@@ -30,55 +30,12 @@ import (
 //   - Load balancer with frontend and backend networks
 
 // NetworkInterface represents a single network interface configuration
-type NetworkInterface struct {
-	// Name is the interface name inside the jail (e.g., "eth0", "lan", "wan")
-	// If empty, uses default naming (epairNb)
-	Name string `json:"name,omitempty"`
+// NetworkInterface is defined in pkg/provider so a handler can reach the
+// capability through an interface rather than this concrete provider.
+type NetworkInterface = provider.NetworkInterface
 
-	// Bridge is the bridge to connect this interface to
-	Bridge string `json:"bridge"`
-
-	// BridgeFlags are the flags applied to the bridge member (e.g., "private")
-	BridgeFlags []string `json:"bridge_flags,omitempty"`
-
-	// VLAN tag for the interface (0 = untagged)
-	VLAN int `json:"vlan,omitempty"`
-
-	// IPv4 configuration
-	IPv4Address string `json:"ipv4_address,omitempty"` // CIDR notation: 10.0.0.2/24
-	IPv4Gateway string `json:"ipv4_gateway,omitempty"` // Default gateway for this interface
-
-	// IPv6 configuration
-	IPv6Address string `json:"ipv6_address,omitempty"` // CIDR notation: fd00::2/64
-	IPv6Gateway string `json:"ipv6_gateway,omitempty"` // Default IPv6 gateway
-
-	// DHCP configuration
-	DHCPv4 bool `json:"dhcpv4,omitempty"` // Use DHCP for IPv4
-	DHCPv6 bool `json:"dhcpv6,omitempty"` // Use DHCPv6 for IPv6
-	SLAAC  bool `json:"slaac,omitempty"`  // Use SLAAC for IPv6
-
-	// Interface options
-	MTU         int      `json:"mtu,omitempty"`         // Interface MTU (0 = default)
-	MAC         string   `json:"mac,omitempty"`         // Custom MAC address
-	Description string   `json:"description,omitempty"` // Interface description
-	Primary     bool     `json:"primary,omitempty"`     // Is this the primary/default interface
-	Routes      []Route  `json:"routes,omitempty"`      // Additional routes via this interface
-	DNSServers  []string `json:"dns_servers,omitempty"` // DNS servers for this interface
-
-	// Internal - populated after creation
-	HostInterface string `json:"host_interface,omitempty"` // epairNa on host side
-	JailInterface string `json:"jail_interface,omitempty"` // epairNb in jail
-}
-
-// Route represents a network route
-type Route struct {
-	// Destination network (CIDR) or "default"
-	Destination string `json:"destination"`
-	// Gateway IP address
-	Gateway string `json:"gateway"`
-	// Metric for route preference (lower = preferred)
-	Metric int `json:"metric,omitempty"`
-}
+// Route is defined in pkg/provider alongside NetworkInterface, which carries it.
+type Route = provider.Route
 
 // MultiNICConfig represents multiple network interface configuration
 type MultiNICConfig struct {

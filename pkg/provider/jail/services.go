@@ -20,24 +20,10 @@ import (
 //   - postgresql, mysql: Databases
 //   - sshd: SSH server
 //   - sendmail, postfix: Mail servers
-
-// ServiceInfo represents information about a service
-type ServiceInfo struct {
-	// Name is the service name (e.g., "nginx", "postgresql")
-	Name string `json:"name"`
-
-	// Enabled indicates if the service is enabled in rc.conf
-	Enabled bool `json:"enabled"`
-
-	// Running indicates if the service is currently running
-	Running bool `json:"running"`
-
-	// Description is a human-readable description
-	Description string `json:"description,omitempty"`
-
-	// RCScript is the path to the rc.d script
-	RCScript string `json:"rc_script,omitempty"`
-}
+//
+// ServiceInfo is defined in pkg/provider so a handler can reach the service
+// capability through an interface rather than this concrete provider.
+type ServiceInfo = provider.ServiceInfo
 
 // ServiceAction represents an action to perform on a service
 type ServiceAction string
@@ -49,11 +35,6 @@ const (
 	ServiceActionReload  ServiceAction = "reload"
 	ServiceActionStatus  ServiceAction = "status"
 )
-
-// validServiceName matches an rc.d script name: sysrc builds "<name>_enable"
-// and splits its argument on the first "=", so a name carrying one — say
-// "sshd_enable=NO" — sets a different variable than the one asked for.
-var validServiceName = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]{0,63}$`)
 
 // validRcVariable matches an rc.conf variable name. sysrc treats the first "="
 // as the assignment delimiter, so a name carrying one sets a different variable
@@ -70,10 +51,7 @@ func validateRcVariable(name string) error {
 
 // validateServiceName rejects anything that is not a plain rc.d service name.
 func validateServiceName(name string) error {
-	if !validServiceName.MatchString(name) {
-		return fmt.Errorf("invalid service name %q: expected a plain rc.d script name", name)
-	}
-	return nil
+	return validation.ValidateServiceName(name)
 }
 
 // EnableService enables a service to start at boot
