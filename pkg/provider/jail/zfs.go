@@ -8,6 +8,7 @@ import (
 
 	"github.com/hospitus/hospitus/pkg/logging"
 	"github.com/hospitus/hospitus/pkg/provider"
+	"github.com/hospitus/hospitus/pkg/validation"
 )
 
 // ensureZFSDataset ensures a ZFS dataset exists
@@ -113,6 +114,18 @@ func (p *JailProvider) ensureOwnDatasetOrSnapshot(name string) error {
 	return p.ensureOwnDataset(ds)
 }
 
+// ensureOwnSnapshot is ensureOwnDatasetOrSnapshot with the "@" made mandatory.
+//
+// "zfs rollback -r" and "zfs destroy" take a <dataset>@<snapshot> name, and
+// handing either a bare dataset would roll back or destroy the whole dataset
+// rather than the snapshot the caller named.
+func (p *JailProvider) ensureOwnSnapshot(name string) error {
+	if !strings.Contains(name, "@") {
+		return fmt.Errorf("refusing %q: not a snapshot name", name)
+	}
+	return p.ensureOwnDatasetOrSnapshot(name)
+}
+
 // ensureOwnDatasetOrParent is ensureOwnDataset plus the parents themselves.
 //
 // Creating "zroot/hospitus/jails" is the normal first step; destroying it is
@@ -140,14 +153,51 @@ func (p *JailProvider) ensureOwnDatasetOrParent(ds string) error {
 // The name is read back from the instance handle, which the API lets a client
 // merge into, so destroy, rollback, clone and promote all check it first.
 func (p *JailProvider) datasetFor(handle provider.InstanceHandle) (string, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return "", fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
+	want := fmt.Sprintf("%s/%s", p.zfsParent, handle.ID)
+
 	ds, ok := handle.Metadata["zfs_dataset"].(string)
 	if !ok || ds == "" {
-		ds = fmt.Sprintf("%s/%s", p.zfsParent, handle.ID)
+		return want, nil
 	}
 	if err := p.ensureOwnDataset(ds); err != nil {
 		return "", err
 	}
+	// Being managed is not enough: a handle whose ID names one jail and whose
+	// metadata names another's dataset would operate on the second while every
+	// message says the first.
+	if ds != want {
+		return "", fmt.Errorf("handle %q carries dataset %s, which belongs to another instance", handle.ID, ds)
+	}
 	return ds, nil
+}
+
+// snapshotFor resolves the ZFS snapshot a handle names, and binds it to the
+// instance the handle declares.
+//
+// The same rule as datasetFor: confinement to the managed parents stops a
+// snapshot from outside, but a forged handle can still set Instance to one jail
+// and zfs_name to another's snapshot — and rollback -r destroys every later
+// snapshot of whatever dataset it is given.
+func (p *JailProvider) snapshotFor(snapshot provider.SnapshotHandle) (string, error) {
+	zfsName, ok := snapshot.Metadata["zfs_name"].(string)
+	if !ok || zfsName == "" {
+		return "", fmt.Errorf("invalid snapshot metadata: missing zfs_name")
+	}
+	if err := p.ensureOwnSnapshot(zfsName); err != nil {
+		return "", err
+	}
+	if err := validation.ValidateInstanceName(snapshot.Instance); err != nil {
+		return "", fmt.Errorf("invalid snapshot instance %q: %w", snapshot.Instance, err)
+	}
+	ds, _, _ := strings.Cut(zfsName, "@")
+	if want := fmt.Sprintf("%s/%s", p.zfsParent, snapshot.Instance); ds != want {
+		return "", fmt.Errorf("snapshot %s belongs to %s, not to the instance %q it is presented for",
+			zfsName, ds, snapshot.Instance)
+	}
+	return zfsName, nil
 }
 
 func (p *JailProvider) destroyZFSDatasetCleanup(ctx context.Context, dataset string) {
