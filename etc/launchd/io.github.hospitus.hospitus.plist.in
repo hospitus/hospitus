@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent for hospitusd on macOS.
+
+  This is a template: @PLACEHOLDER@ values are substituted by
+  scripts/hospitus-macos-service.sh, which also creates the directories and
+  generates the API key. Install it by hand only if you know what you are doing.
+
+  It is a LaunchAgent, not a LaunchDaemon: the providers available on macOS are
+  QEMU (accelerated through Hypervisor.framework, which needs no privileges) and
+  Podman (which talks to a user-owned podman machine). Running as the logged-in
+  user keeps the data directory, the API key and the VM disks owned by that user.
+
+  The listen address is loopback-only and TLS is disabled, matching the FreeBSD
+  service default. Exposing the daemon on the network means adding
+  --tls-cert/--tls-key here and changing --addr.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>io.github.hospitus.hospitus</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>@HOSPITUSD@</string>
+		<string>--addr</string>
+		<string>@ADDR@</string>
+		<string>--data-dir</string>
+		<string>@DATA_DIR@</string>
+		<string>--state-dir</string>
+		<string>@STATE_DIR@</string>
+		<string>--db</string>
+		<string>@DB@</string>
+		<string>--api-key-file</string>
+		<string>@KEY_FILE@</string>
+		<string>--audit-log</string>
+		<string>@LOG_DIR@/audit.log</string>
+		<string>--allow-insecure-tls</string>
+	</array>
+
+	<key>EnvironmentVariables</key>
+	<dict>
+		<!--
+		  launchd starts agents with a minimal PATH. hospitusd shells out to
+		  qemu-system-*, qemu-img and podman, which Homebrew installs under
+		  /opt/homebrew (Apple Silicon) or /usr/local (Intel); without this the
+		  providers report themselves unavailable on a Mac that has them.
+		-->
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+
+	<key>RunAtLoad</key>
+	<true/>
+
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+
+	<key>StandardOutPath</key>
+	<string>@LOG_DIR@/hospitusd.log</string>
+
+	<key>StandardErrorPath</key>
+	<string>@LOG_DIR@/hospitusd.log</string>
+
+	<key>ProcessType</key>
+	<string>Background</string>
+</dict>
+</plist>

@@ -1,0 +1,70 @@
+# hospitusd.conf — Hospitus Daemon Configuration
+# Place this file at /usr/local/etc/hospitus/hospitusd.conf on FreeBSD.
+#
+# All keys use key = value syntax. Lines starting with # are comments.
+# Quoted and unquoted values are both accepted.
+#
+# Run `hospitusd --help` for the full list of command-line flags (flags take
+# precedence over this file for network/jail settings).
+
+###############################################################################
+# Network — IP Pool and Routing
+###############################################################################
+
+# ip_pool: CIDR block to allocate IPs from for VNET jails and NAT-mode VMs.
+# Default is auto-detected from the host. Set explicitly for reliability.
+#ip_pool = 10.100.0.0/16
+
+# external_interface: Host network interface used for outbound NAT.
+# "auto" means Hospitus will pick the default route interface automatically.
+#external_interface = auto
+
+# enable_ip_forwarding: Set net.inet.ip.forwarding=1 at startup.
+#enable_ip_forwarding = true
+
+# enable_nat: Configure PF NAT rules for outbound traffic from jails/VMs.
+#enable_nat = true
+
+# nat_network: Source subnet for NAT rules. "auto" derives from ip_pool.
+#nat_network = auto
+
+# default_gateway: Default gateway for VNET jails. "auto" uses the host default.
+#default_gateway = auto
+
+# auto_create_bridges: Create bridge interfaces (e.g. hospitus0) automatically.
+#auto_create_bridges = true
+
+###############################################################################
+# Network — Advanced
+###############################################################################
+
+# bridge_prefix: Prefix for bridge interfaces created by Hospitus.
+# Default is "hospitus", producing hospitus0, hospitus1, etc.
+#bridge_prefix = hospitus
+
+# pf_anchor_name: PF anchor used for Hospitus NAT and port-forwarding rules.
+# Must match the anchor referenced in /etc/pf.conf:
+#   anchor "hospitus"
+#pf_anchor_name = hospitus
+
+# enable_ipv6: Enable IPv6 allocation and NAT64 for jails.
+#enable_ipv6 = false
+
+# ipv6_prefix: ULA /48 prefix for automatic IPv6 address assignment.
+#ipv6_prefix = fd00::/48
+
+# firewall_type: Which firewall Hospitus programs for NAT and port forwarding.
+# "pf" is the FreeBSD default; "ipfw" and "none" are also accepted. "none"
+# leaves the host firewall alone, and port forwarding then does nothing.
+#firewall_type = pf
+
+###############################################################################
+# Storage — Physical disk passthrough
+###############################################################################
+
+# allowed_physical_disks: Host devices a VM may be given raw access to,
+# separated by spaces. Passthrough hands the guest a real disk, so this is
+# default-deny: an empty list permits nothing, and a device has to be named
+# here before any manifest can ask for it. The daemon must be restarted for a
+# change to take effect.
+#allowed_physical_disks = /dev/nda0 /dev/ada2
