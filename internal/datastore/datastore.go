@@ -519,10 +519,21 @@ func (ds *Datastore) UpdateBackupConfig(ctx context.Context, id string, config *
 	return nil
 }
 
-// RenameInstance updates the name (and corresponding id) of an instance.
+// RenameInstance updates the id, name and handle of an instance together.
 // Both the id and the name columns are set to newName because bhyve uses the name
 // as the primary key (the VM directory name).
-func (ds *Datastore) RenameInstance(ctx context.Context, oldName, newName string) error {
+//
+// The handle moves in the same transaction on purpose. It used to be a second
+// call: when it failed, the row had already committed the new id and name while
+// its handle still named the old instance, and every handle-taking operation —
+// delete included, which destroys the dataset the handle names — worked on the
+// wrong one.
+func (ds *Datastore) RenameInstance(ctx context.Context, oldName, newName string, handle provider.InstanceHandle) error {
+	handleJSON, err := json.Marshal(handle)
+	if err != nil {
+		return fmt.Errorf("failed to marshal handle: %w", err)
+	}
+
 	tx, err := ds.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin rename transaction: %w", err)
@@ -538,8 +549,8 @@ func (ds *Datastore) RenameInstance(ctx context.Context, oldName, newName string
 	}
 
 	result, err := tx.ExecContext(ctx,
-		`UPDATE instances SET id = ?, name = ?, updated_at = ? WHERE id = ?`,
-		newName, newName, time.Now(), oldName)
+		`UPDATE instances SET id = ?, name = ?, handle = ?, updated_at = ? WHERE id = ?`,
+		newName, newName, string(handleJSON), time.Now(), oldName)
 	if err != nil {
 		return fmt.Errorf("failed to rename instance: %w", err)
 	}
