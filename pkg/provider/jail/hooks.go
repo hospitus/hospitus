@@ -72,9 +72,12 @@ type HookConfig struct {
 
 // HookResult represents the result of hook execution
 type HookResult struct {
-	Type     HookType      `json:"type"`
-	Command  string        `json:"command"`
-	ExitCode int           `json:"exit_code"`
+	Type     HookType `json:"type"`
+	Command  string   `json:"command"`
+	ExitCode int      `json:"exit_code"`
+	// TimedOut distinguishes a hook the deadline killed from one that chose
+	// its own exit code.
+	TimedOut bool          `json:"timed_out"`
 	Output   string        `json:"output"`
 	Duration time.Duration `json:"duration"`
 	Error    error         `json:"error,omitempty"`
@@ -303,6 +306,12 @@ func (p *JailProvider) executeHook(ctx context.Context, scriptPath string, env H
 	cmd := exec.CommandContext(ctx, scriptPath)
 	cmd.Env = p.buildHookEnv(env)
 
+	// A killed process does not close the pipes its own children inherited, so
+	// Wait can outlive the deadline by as long as a grandchild keeps running —
+	// on a jail exec, that is however long the command inside would have taken.
+	// WaitDelay bounds the wait and closes the pipes.
+	cmd.WaitDelay = 5 * time.Second
+
 	// Capture output
 	output, err := cmd.CombinedOutput()
 
@@ -314,6 +323,15 @@ func (p *JailProvider) executeHook(ctx context.Context, scriptPath string, env H
 	}
 
 	if err != nil {
+		// The timeout kills the hook, which surfaces as an ExitError; without
+		// this the result reads as a hook that ran and chose to fail.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			result.ExitCode = -1
+			result.TimedOut = true
+			result.Error = fmt.Errorf("hook %s timed out after %s (output: %s)", scriptPath, timeout, string(output))
+			result.Fatal = failOnError
+			return result
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			result.ExitCode = exitErr.ExitCode()

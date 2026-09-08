@@ -475,6 +475,9 @@ func validMAC(s string) bool {
 // so it does not linger as a zombie for the daemon's lifetime.
 func (p *JailProvider) startDHCPClient(ctx context.Context, client, jailName, jailIface string) {
 	cmd := exec.Command("jexec", jailName, client, jailIface) //nolint:gosec // G204: both names are validated above
+	// A nil Env would hand the daemon's environment to a long-lived process
+	// inside the jail.
+	cmd.Env = provider.MinimalEnv()
 	if err := cmd.Start(); err != nil {
 		p.logWarn(ctx, "failed to start "+client, "jail", jailName, "interface", jailIface, logging.FieldError, err)
 		return
