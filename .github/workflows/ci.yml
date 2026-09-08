@@ -198,8 +198,23 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
+          # Asked of the toolchain, not of the directory listing: the branch
+          # that adds the CLI's internal helpers creates cmd/hospitus-cli/
+          # several commits before main.go lands in it, and a directory holding
+          # only a _test.go or a doc.go passes a file test while go build fails.
+          # go list answers "main" only for something go build can link, and it
+          # reads the same GOOS/GOARCH as the build below. Its errors are not
+          # swallowed: a broken go.mod has to fail the step, not be reported as
+          # a missing CLI.
           if [ ! -d cmd/hospitus-cli ]; then
             echo "no CLI on this branch yet"
+            exit 0
+          fi
+          # Loudly, before the tolerant query below: a broken go.mod fails the
+          # step here rather than passing for a missing CLI.
+          go list -m >/dev/null
+          if [ "$(go list -e -f '{{.Name}}' ./cmd/hospitus-cli)" != "main" ]; then
+            echo "cmd/hospitus-cli is not a main package on this branch yet"
             exit 0
           fi
           mkdir -p dist
