@@ -335,6 +335,9 @@ func (p *JailProvider) DetachDisk(ctx context.Context, handle provider.InstanceH
 
 // AttachNetwork attaches a network interface to a jail
 func (p *JailProvider) AttachNetwork(ctx context.Context, handle provider.InstanceHandle, network provider.NetworkAttachment) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	iface := NetworkInterface{
 		Bridge:      network.Network.Bridge,
 		IPv4Address: network.Network.IPv4,
@@ -348,11 +351,17 @@ func (p *JailProvider) AttachNetwork(ctx context.Context, handle provider.Instan
 
 // DetachNetwork detaches a network interface from a jail
 func (p *JailProvider) DetachNetwork(ctx context.Context, handle provider.InstanceHandle, interfaceID string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	return p.RemoveNetworkInterface(ctx, handle, interfaceID)
 }
 
 // ResizeConsole updates the terminal dimensions for a jail session.
 func (p *JailProvider) ResizeConsole(ctx context.Context, handle provider.InstanceHandle, width, height int) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	return nil
 }
 

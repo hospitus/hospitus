@@ -52,6 +52,9 @@ type JailConsoleConnection struct {
 //
 // The returned connection provides Read/Write access to the shell.
 func (p *JailProvider) GetConsole(ctx context.Context, handle provider.InstanceHandle) (provider.ConsoleConnection, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -179,6 +182,9 @@ func (c *JailConsoleConnection) Close() error {
 // This is the non-interactive version that captures stdout/stderr.
 // For interactive commands, use ExecInteractive instead.
 func (p *JailProvider) ExecCommand(ctx context.Context, handle provider.InstanceHandle, opts provider.ExecOptions) (*provider.ExecResult, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -271,6 +277,9 @@ func (p *JailProvider) ExecCommand(ctx context.Context, handle provider.Instance
 // This attaches stdin/stdout/stderr for interactive use and is suitable
 // for running shells or interactive programs.
 func (p *JailProvider) ExecInteractive(ctx context.Context, handle provider.InstanceHandle, opts provider.ExecOptions) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -334,6 +343,9 @@ type ConsoleInfo struct {
 
 // GetConsoleInfo returns information about the jail's console configuration.
 func (p *JailProvider) GetConsoleInfo(ctx context.Context, handle provider.InstanceHandle) (*ConsoleInfo, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -361,6 +373,9 @@ func (p *JailProvider) GetConsoleInfo(ctx context.Context, handle provider.Insta
 //
 //	ExecInteractive(ctx, handle, ExecOptions{Command: "/bin/sh"})
 func (p *JailProvider) ExecConsole(ctx context.Context, handle provider.InstanceHandle, shell string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	if shell == "" {
 		shell = "/bin/sh"
 	}
@@ -373,6 +388,12 @@ func (p *JailProvider) ExecConsole(ctx context.Context, handle provider.Instance
 // ExecCommandStream executes a command inside a jail and streams output to the provided writers.
 // This allows real-time output display for long-running commands like pkg install.
 func (p *JailProvider) ExecCommandStream(ctx context.Context, handle provider.InstanceHandle, opts provider.ExecOptions, stdout, stderr io.Writer) (int, error) {
+	// -1, like every other pre-execution error here: 0 is the exit code of a
+	// command that ran and succeeded, and a caller forwarding this value
+	// reported success for a request that never reached the jail.
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return -1, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running

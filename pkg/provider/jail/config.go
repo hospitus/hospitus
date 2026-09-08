@@ -220,6 +220,20 @@ func determineRuntimeType(spec provider.InstanceSpec) string {
 }
 
 // saveJailConfig saves jail configuration to file
+// syncDir flushes a directory entry so a rename into it survives a crash.
+//
+// Sync on the file persists its contents; the rename that puts it under its
+// final name lives in the parent directory, and that entry needs its own
+// flush. Best-effort: the write already succeeded.
+func syncDir(path string) {
+	d, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
+}
+
 func (p *JailProvider) saveJailConfig(config *jailConfig, path string) error {
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -250,7 +264,11 @@ func (p *JailProvider) saveJailConfig(config *jailConfig, path string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	syncDir(filepath.Dir(path))
+	return nil
 }
 
 // loadJailConfig loads jail configuration from file

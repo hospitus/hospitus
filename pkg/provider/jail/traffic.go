@@ -29,6 +29,9 @@ type TrafficStats struct {
 //
 // For more advanced accounting, CBSD uses ipfw with counters or RACCT.
 func (p *JailProvider) GetTrafficStats(ctx context.Context, handle provider.InstanceHandle) ([]TrafficStats, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running

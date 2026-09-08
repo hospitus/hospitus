@@ -465,5 +465,8 @@ var _ provider.InstanceAddressProvider = (*JailProvider)(nil)
 
 // InstanceAddresses reports the addresses the jail's interfaces hold.
 func (p *JailProvider) InstanceAddresses(ctx context.Context, handle provider.InstanceHandle) ([]net.IP, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	return p.getJailIPs(ctx, handle.ID)
 }

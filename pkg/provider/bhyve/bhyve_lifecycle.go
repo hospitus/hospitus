@@ -755,12 +755,12 @@ func (p *BhyveProvider) CreateInstance(ctx context.Context, spec provider.Instan
 
 // DeleteInstance deletes a bhyve VM
 func (p *BhyveProvider) DeleteInstance(ctx context.Context, handle provider.InstanceHandle, force bool) (err error) {
-	if err := validation.ValidateInstanceName(handle.ID); err != nil {
-		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
-	}
 	// Attach provider context so the API layer can tell a failed delete from an
 	// internal fault, and show the caller why it failed.
 	defer func() { err = provider.WrapError("bhyve", "delete", handle.ID, err) }()
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 
 	ctx, releaseLock, lockErr := p.locks.Acquire(ctx, handle.ID)
 	if lockErr != nil {
@@ -853,12 +853,12 @@ func (p *BhyveProvider) DeleteInstance(ctx context.Context, handle provider.Inst
 
 // StartInstance starts a bhyve VM
 func (p *BhyveProvider) StartInstance(ctx context.Context, handle provider.InstanceHandle) (err error) {
-	if err := validation.ValidateInstanceName(handle.ID); err != nil {
-		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
-	}
 	// Attach provider context so the API layer can tell a failed start from an
 	// internal fault, and show the caller why it failed.
 	defer func() { err = provider.WrapError("bhyve", "start", handle.ID, err) }()
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 
 	ctx, releaseLock, lockErr := p.locks.Acquire(ctx, handle.ID)
 	if lockErr != nil {
@@ -1237,12 +1237,12 @@ const defaultCloudImageDiskGB = 20
 
 // StopInstance stops a bhyve VM
 func (p *BhyveProvider) StopInstance(ctx context.Context, handle provider.InstanceHandle, opts provider.StopOptions) (err error) {
-	if err := validation.ValidateInstanceName(handle.ID); err != nil {
-		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
-	}
 	// Attach provider context so the API layer can tell a failed stop from an
 	// internal fault, and show the caller why it failed.
 	defer func() { err = provider.WrapError("bhyve", "stop", handle.ID, err) }()
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 
 	ctx, releaseLock, lockErr := p.locks.Acquire(ctx, handle.ID)
 	if lockErr != nil {
@@ -1364,12 +1364,12 @@ func (p *BhyveProvider) StopInstance(ctx context.Context, handle provider.Instan
 
 // RestartInstance restarts a bhyve VM
 func (p *BhyveProvider) RestartInstance(ctx context.Context, handle provider.InstanceHandle) (err error) {
-	if err := validation.ValidateInstanceName(handle.ID); err != nil {
-		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
-	}
 	// Attach provider context so the API layer can tell a failed restart from an
 	// internal fault, and show the caller why it failed.
 	defer func() { err = provider.WrapError("bhyve", "restart", handle.ID, err) }()
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 
 	ctx, releaseLock, lockErr := p.locks.Acquire(ctx, handle.ID)
 	if lockErr != nil {

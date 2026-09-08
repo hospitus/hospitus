@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/hospitus/hospitus/pkg/provider"
+	"github.com/hospitus/hospitus/pkg/validation"
 )
 
 // Tmux sessions allow:
@@ -72,6 +73,9 @@ var _ TmuxProvider = (*JailProvider)(nil)
 
 // TmuxHasSupport checks if tmux is installed in the jail.
 func (p *JailProvider) TmuxHasSupport(ctx context.Context, handle provider.InstanceHandle) (bool, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return false, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -101,6 +105,9 @@ func (p *JailProvider) TmuxHasSupport(ctx context.Context, handle provider.Insta
 
 // TmuxInstall installs tmux in the jail using pkg.
 func (p *JailProvider) TmuxInstall(ctx context.Context, handle provider.InstanceHandle) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -130,6 +137,9 @@ func (p *JailProvider) TmuxInstall(ctx context.Context, handle provider.Instance
 
 // TmuxListSessions lists all tmux sessions in the jail.
 func (p *JailProvider) TmuxListSessions(ctx context.Context, handle provider.InstanceHandle) ([]TmuxSession, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -199,6 +209,9 @@ func (p *JailProvider) TmuxListSessions(ctx context.Context, handle provider.Ins
 var errTmuxSessionExists = errors.New("session already exists")
 
 func (p *JailProvider) TmuxNewSession(ctx context.Context, handle provider.InstanceHandle, sessionName string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -242,6 +255,9 @@ func (p *JailProvider) TmuxNewSession(ctx context.Context, handle provider.Insta
 // TmuxAttachSession attaches to an existing tmux session interactively.
 // This uses jexec directly to provide proper TTY handling.
 func (p *JailProvider) TmuxAttachSession(ctx context.Context, handle provider.InstanceHandle, sessionName string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -305,6 +321,9 @@ func (p *JailProvider) TmuxAttachSession(ctx context.Context, handle provider.In
 
 // TmuxKillSession kills a tmux session in the jail.
 func (p *JailProvider) TmuxKillSession(ctx context.Context, handle provider.InstanceHandle, sessionName string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -338,6 +357,9 @@ func (p *JailProvider) TmuxKillSession(ctx context.Context, handle provider.Inst
 // TmuxSendKeys sends keys/commands to a tmux session.
 // Use "Enter" at the end to execute the command.
 func (p *JailProvider) TmuxSendKeys(ctx context.Context, handle provider.InstanceHandle, sessionName, keys string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -371,6 +393,9 @@ func (p *JailProvider) TmuxSendKeys(ctx context.Context, handle provider.Instanc
 // TmuxCapturePane captures the current content of a tmux pane.
 // Useful for getting output from commands sent via TmuxSendKeys.
 func (p *JailProvider) TmuxCapturePane(ctx context.Context, handle provider.InstanceHandle, sessionName string, lines int) (string, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return "", fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -410,6 +435,9 @@ func (p *JailProvider) TmuxCapturePane(ctx context.Context, handle provider.Inst
 // TmuxGetOrCreateSession ensures a session exists and returns its name.
 // If the session doesn't exist, it creates one.
 func (p *JailProvider) TmuxGetOrCreateSession(ctx context.Context, handle provider.InstanceHandle, sessionName string) (string, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return "", fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Use jail name as default session name
@@ -456,6 +484,9 @@ func (p *JailProvider) TmuxGetOrCreateSession(ctx context.Context, handle provid
 // TmuxExecInSession executes a command in a tmux session and waits for output.
 // This is useful for long-running commands that need to persist.
 func (p *JailProvider) TmuxExecInSession(ctx context.Context, handle provider.InstanceHandle, sessionName, command string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	// Ensure session exists
 	sessionName, err := p.TmuxGetOrCreateSession(ctx, handle, sessionName)
 	if err != nil {
@@ -474,6 +505,9 @@ type TmuxInfo struct {
 
 // GetTmuxInfo returns tmux session information for the jail.
 func (p *JailProvider) GetTmuxInfo(ctx context.Context, handle provider.InstanceHandle) (*TmuxInfo, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -519,6 +553,9 @@ func (p *JailProvider) GetTmuxInfo(ctx context.Context, handle provider.Instance
 // This is the preferred method for long-running provisioning commands.
 // The command runs in a tmux session, allowing reconnection if connection drops.
 func (p *JailProvider) TmuxExecCommandStream(ctx context.Context, handle provider.InstanceHandle, sessionName, command string, output *bytes.Buffer) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	// Ensure session exists
 	sessionName, err := p.TmuxGetOrCreateSession(ctx, handle, sessionName)
 	if err != nil {

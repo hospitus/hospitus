@@ -79,12 +79,20 @@ func (p *BhyveProvider) SetAutoStart(ctx context.Context, handle provider.Instan
 		tmp.Close()
 		return fmt.Errorf("failed to write autostart config: %w", err)
 	}
+	// The rename gives readers atomicity, not durability: without this a crash
+	// just after it can leave the new name on contents that never reached the
+	// disk.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to write autostart config: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("failed to write autostart config: %w", err)
 	}
 	if err := os.Rename(tmpName, autostartFile); err != nil {
 		return fmt.Errorf("failed to write autostart config: %w", err)
 	}
+	syncDir(filepath.Dir(autostartFile))
 
 	return nil
 }

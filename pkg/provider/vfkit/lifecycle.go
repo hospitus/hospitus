@@ -206,10 +206,10 @@ func (p *VFKitProvider) buildArgs(config *vmConfig) []string {
 
 // StartInstance boots the VM as its own process.
 func (p *VFKitProvider) StartInstance(ctx context.Context, handle provider.InstanceHandle) (err error) {
+	defer func() { err = provider.WrapError("vfkit", "start", handle.ID, err) }()
 	if err := validation.ValidateInstanceName(handle.ID); err != nil {
 		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
 	}
-	defer func() { err = provider.WrapError("vfkit", "start", handle.ID, err) }()
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -294,10 +294,10 @@ func (p *VFKitProvider) waitForControlSocket(ctx context.Context, name string) e
 
 // StopInstance asks the VM to shut down, and kills it if it will not.
 func (p *VFKitProvider) StopInstance(ctx context.Context, handle provider.InstanceHandle, opts provider.StopOptions) (err error) {
+	defer func() { err = provider.WrapError("vfkit", "stop", handle.ID, err) }()
 	if err := validation.ValidateInstanceName(handle.ID); err != nil {
 		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
 	}
-	defer func() { err = provider.WrapError("vfkit", "stop", handle.ID, err) }()
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -387,10 +387,10 @@ func (p *VFKitProvider) removeSocket(ctx context.Context, name string) {
 
 // RestartInstance stops the VM and starts it again.
 func (p *VFKitProvider) RestartInstance(ctx context.Context, handle provider.InstanceHandle) (err error) {
+	defer func() { err = provider.WrapError("vfkit", "restart", handle.ID, err) }()
 	if err := validation.ValidateInstanceName(handle.ID); err != nil {
 		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
 	}
-	defer func() { err = provider.WrapError("vfkit", "restart", handle.ID, err) }()
 
 	if err := p.StopInstance(ctx, handle, provider.StopOptions{}); err != nil {
 		return err
@@ -400,10 +400,10 @@ func (p *VFKitProvider) RestartInstance(ctx context.Context, handle provider.Ins
 
 // DeleteInstance removes the VM and everything it owns.
 func (p *VFKitProvider) DeleteInstance(ctx context.Context, handle provider.InstanceHandle, force bool) (err error) {
+	defer func() { err = provider.WrapError("vfkit", "delete", handle.ID, err) }()
 	if err := validation.ValidateInstanceName(handle.ID); err != nil {
 		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
 	}
-	defer func() { err = provider.WrapError("vfkit", "delete", handle.ID, err) }()
 
 	// The running check, the forced stop and the removal are one transition.
 	// Taking the lock only for the removal left a window in which a concurrent

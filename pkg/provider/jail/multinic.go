@@ -6,6 +6,7 @@ import (
 	"net"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -96,6 +97,9 @@ type MultiNICConfig struct {
 
 // AddNetworkInterface adds a network interface to a running jail
 func (p *JailProvider) AddNetworkInterface(ctx context.Context, handle provider.InstanceHandle, iface NetworkInterface) (*NetworkInterface, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -344,10 +348,55 @@ func (p *JailProvider) recordNetworkInterface(jailName string, iface NetworkInte
 	return p.saveJailConfig(cfg, configPath)
 }
 
+// forgetNetworkInterface drops the persisted entries naming any of the given
+// interfaces.
+//
+// The counterpart to recordNetworkInterface, which had none: destroying an
+// epair left its entry in the jail's Networks, and the next start built the
+// interface again — a removal that undid itself at the next reboot.
+//
+// Several names because one attachment is known under two: the host epair and
+// the in-jail name, which may have been renamed after the pair was created.
+func (p *JailProvider) forgetNetworkInterface(jailName string, names ...string) error {
+	configPath := filepath.Join(p.stateDir, fmt.Sprintf("%s.json", jailName))
+	cfg, err := p.loadJailConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to load jail config: %w", err)
+	}
+
+	drop := func(specs []provider.NetworkSpec) []provider.NetworkSpec {
+		kept := specs[:0:0]
+		for i := range specs {
+			if specs[i].ID != "" && slices.Contains(names, specs[i].ID) {
+				continue
+			}
+			kept = append(kept, specs[i])
+		}
+		return kept
+	}
+	cfg.Networks = drop(cfg.Networks)
+	cfg.Spec.Networks = drop(cfg.Spec.Networks)
+
+	return p.saveJailConfig(cfg, configPath)
+}
+
 // RemoveNetworkInterface removes a network interface from a jail
 func (p *JailProvider) RemoveNetworkInterface(ctx context.Context, handle provider.InstanceHandle, interfaceName string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
+	// The name reaches "ifconfig <name> -vnet" and, below, an epair destroy,
+	// both as root on the host — so it is checked for shape before either.
+	//
+	// Not ownership: the provider keeps no record of which interfaces a jail
+	// holds once it is stopped, and ListNetworkInterfaces asks the guest, which
+	// requires it to be running. The epair branch below is guarded by its own
+	// prefix test instead.
+	if err := validation.ValidateInterfaceName(interfaceName); err != nil {
+		return fmt.Errorf("invalid interface name %q: %w", interfaceName, err)
+	}
 	// Check if jail is running
 	state, err := p.GetInstanceState(ctx, handle)
 	if err != nil {
@@ -368,7 +417,12 @@ func (p *JailProvider) RemoveNetworkInterface(ctx context.Context, handle provid
 	// nothing to do with this jail.
 	if !strings.HasPrefix(interfaceName, "epair") {
 		// Renamed interface: without tracking the original epair there is
-		// nothing safe to destroy.
+		// nothing safe to destroy. The record still goes, or the next start
+		// rebuilds an interface the operator asked to remove.
+		if err := p.forgetNetworkInterface(jailName, interfaceName); err != nil {
+			p.logWarn(ctx, "interface removed but still recorded; it will come back on the next start",
+				"jail", jailName, "interface", interfaceName, logging.FieldError, err)
+		}
 		return nil
 	}
 	epairA := interfaceName
@@ -378,6 +432,14 @@ func (p *JailProvider) RemoveNetworkInterface(ctx context.Context, handle provid
 
 	if output, err := p.cmd().CombinedOutput(ctx, "ifconfig", epairA, "destroy"); err != nil {
 		return fmt.Errorf("failed to destroy %s: %w (output: %s)", epairA, err, string(output))
+	}
+
+	// Both sides, because the caller may name either: a rollback passes the
+	// host epair, an operator the name inside the jail.
+	if err := p.forgetNetworkInterface(jailName, interfaceName,
+		strings.TrimSuffix(epairA, "a")+"b", epairA); err != nil {
+		p.logWarn(ctx, "interface destroyed but still recorded; it will come back on the next start",
+			"jail", jailName, "interface", interfaceName, logging.FieldError, err)
 	}
 
 	return nil
@@ -491,6 +553,7 @@ func (p *JailProvider) startDHCPClient(ctx context.Context, client, jailName, ja
 }
 
 // ListNetworkInterfaces lists all network interfaces in a jail
+
 func (p *JailProvider) ListNetworkInterfaces(ctx context.Context, handle provider.InstanceHandle) ([]NetworkInterface, error) {
 	if err := validation.ValidateInstanceName(handle.ID); err != nil {
 		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
@@ -619,11 +682,27 @@ func (p *JailProvider) ListNetworkInterfaces(ctx context.Context, handle provide
 
 // ConfigureMultiNIC configures multiple network interfaces for a jail
 func (p *JailProvider) ConfigureMultiNIC(ctx context.Context, handle provider.InstanceHandle, config MultiNICConfig) error {
-	if len(config.Interfaces) == 0 {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
+	// Checked before anything is added, and whether or not there are interfaces
+	// to add: a hostname refused after the loop would leave the jail half
+	// configured for a value that was never going to be accepted.
+	if config.Hostname != "" {
+		if err := validation.ValidateJailParameterValue(config.Hostname); err != nil {
+			return fmt.Errorf("invalid hostname %q: %w", config.Hostname, err)
+		}
+	}
+
+	if len(config.Interfaces) == 0 && config.Hostname == "" {
 		return nil
 	}
 
-	// Add each interface
+	// Add each interface. Both names are kept: the host epair is what
+	// RemoveNetworkInterface can destroy, and the in-jail name is what the
+	// persisted record is filed under once a rename has happened.
+	type addedInterface struct{ host, jail string }
+	var addedInterfaces []addedInterface
 	for i := range config.Interfaces {
 		iface := &config.Interfaces[i]
 		// Mark primary interface
@@ -631,15 +710,52 @@ func (p *JailProvider) ConfigureMultiNIC(ctx context.Context, handle provider.In
 			iface.Primary = true
 		}
 
-		_, err := p.AddNetworkInterface(ctx, handle, *iface)
+		added, err := p.AddNetworkInterface(ctx, handle, *iface)
 		if err != nil {
 			return fmt.Errorf("failed to add interface %d: %w", i, err)
 		}
+		if added != nil {
+			// The host side, not the display name: RemoveNetworkInterface
+			// destroys an epair only when the name it is given still carries
+			// the "epair" prefix, and AddNetworkInterface overwrites
+			// JailInterface with the new name when the in-jail rename
+			// succeeds. HostInterface keeps the prefix, and destroying epairNa
+			// takes both sides with it.
+			host := added.HostInterface
+			if host == "" {
+				host = added.JailInterface
+			}
+			if host == "" {
+				host = added.Name
+			}
+			addedInterfaces = append(addedInterfaces, addedInterface{host: host, jail: added.JailInterface})
+		}
 	}
 
-	// Set hostname if specified
+	// Set hostname if specified. The value was checked before the loop above,
+	// so this cannot fail on a malformed name after interfaces were added.
 	if config.Hostname != "" {
-		_ = p.cmd().Run(ctx, "jexec", handle.ID, "hostname", config.Hostname) // best-effort; hostname failure is non-fatal
+		if output, err := p.cmd().CombinedOutput(ctx, "jexec", handle.ID, "hostname", config.Hostname); err != nil {
+			for _, added := range addedInterfaces {
+				// Best-effort, but not silent: a rollback that fails leaves an
+				// interface ConfigureMultiNIC reports as removed, and the
+				// operator had no way to know.
+				if rmErr := p.RemoveNetworkInterface(ctx, handle, added.host); rmErr != nil {
+					p.logWarn(ctx, "failed to roll back interface", "jail", handle.ID,
+						"interface", added.host, logging.FieldError, rmErr)
+				}
+				// RemoveNetworkInterface forgets the record under the name it
+				// was given and the epair's two sides. A renamed interface is
+				// filed under neither, so it is dropped by name here.
+				if added.jail != "" && added.jail != added.host {
+					if fErr := p.forgetNetworkInterface(handle.ID, added.jail); fErr != nil {
+						p.logWarn(ctx, "interface rolled back but still recorded", "jail", handle.ID,
+							"interface", added.jail, logging.FieldError, fErr)
+					}
+				}
+			}
+			return fmt.Errorf("failed to set hostname %q: %w (output: %s)", config.Hostname, err, string(output))
+		}
 	}
 
 	return nil
@@ -680,6 +796,9 @@ func hexNetmaskToCIDR(hex string) string {
 
 // GetDefaultRoute returns the default gateway for a jail
 func (p *JailProvider) GetDefaultRoute(ctx context.Context, handle provider.InstanceHandle) (string, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return "", fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	output, err := p.cmd().Output(ctx, "jexec", handle.ID, "route", "-n", "get", "default")
 	if err != nil {
 		return "", nil // No default route
@@ -698,7 +817,25 @@ func (p *JailProvider) GetDefaultRoute(ctx context.Context, handle provider.Inst
 
 // SetDefaultRoute sets the default gateway for a jail
 func (p *JailProvider) SetDefaultRoute(ctx context.Context, handle provider.InstanceHandle, gateway string, ipv6 bool) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
+
+	// Validated before the delete below: the current default route goes first,
+	// and a gateway the add then refuses leaves the jail with none at all —
+	// which includes an address of the wrong family, since "route -6 add" will
+	// not take an IPv4 gateway.
+	if err := validation.ValidateIPAddress(gateway); err != nil {
+		return fmt.Errorf("invalid gateway %q: %w", gateway, err)
+	}
+	if addr := net.ParseIP(gateway); addr == nil || (addr.To4() != nil) == ipv6 {
+		family := "IPv4"
+		if ipv6 {
+			family = "IPv6"
+		}
+		return fmt.Errorf("gateway %q is not an %s address", gateway, family)
+	}
 
 	// Delete existing default route
 	if ipv6 {

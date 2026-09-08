@@ -1096,6 +1096,21 @@ func checkConfigValues(config *vmConfig) error {
 	return nil
 }
 
+// syncDir flushes a directory entry so a rename into it survives a crash.
+//
+// tmp.Sync persists the file's contents; the rename that puts it under its
+// final name lives in the parent directory, and that entry needs its own
+// flush. Best-effort: the write already succeeded, and a filesystem that
+// refuses to sync a directory is not a reason to fail the operation.
+func syncDir(path string) {
+	d, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
+}
+
 func (p *BhyveProvider) saveVMConfig(vmDir string, config *vmConfig) error {
 	if err := checkConfigValues(config); err != nil {
 		return fmt.Errorf("refusing to write vm.conf: %w", err)
@@ -1193,12 +1208,20 @@ func (p *BhyveProvider) saveVMConfig(vmDir string, config *vmConfig) error {
 		tmp.Close()
 		return fmt.Errorf("failed to set config permissions: %w", err)
 	}
+	// The rename gives readers atomicity, not durability: without this a crash
+	// just after it can leave the new name on contents that never reached the
+	// disk — an empty vm.conf for a VM that exists.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to flush the VM config: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("failed to close the VM config: %w", err)
 	}
 	if err := os.Rename(tmpName, configPath); err != nil {
 		return fmt.Errorf("failed to install the VM config: %w", err)
 	}
+	syncDir(filepath.Dir(configPath))
 	return nil
 }
 

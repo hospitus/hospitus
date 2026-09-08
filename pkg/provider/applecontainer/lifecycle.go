@@ -112,10 +112,10 @@ func commandArgs(providerConfig map[string]interface{}) ([]string, error) {
 
 // StartInstance starts a created container.
 func (p *Provider) StartInstance(ctx context.Context, handle provider.InstanceHandle) (err error) {
+	defer func() { err = provider.WrapError("container", "start", handle.ID, err) }()
 	if err := validation.ValidateInstanceName(handle.ID); err != nil {
 		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
 	}
-	defer func() { err = provider.WrapError("container", "start", handle.ID, err) }()
 
 	if output, err := p.cmd().CombinedOutput(ctx, p.containerBin, "start", handle.ID); err != nil {
 		return fmt.Errorf("failed to start container: %w (output: %s)", err, string(output))
@@ -125,10 +125,10 @@ func (p *Provider) StartInstance(ctx context.Context, handle provider.InstanceHa
 
 // StopInstance stops a running container.
 func (p *Provider) StopInstance(ctx context.Context, handle provider.InstanceHandle, opts provider.StopOptions) (err error) {
+	defer func() { err = provider.WrapError("container", "stop", handle.ID, err) }()
 	if err := validation.ValidateInstanceName(handle.ID); err != nil {
 		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
 	}
-	defer func() { err = provider.WrapError("container", "stop", handle.ID, err) }()
 
 	args := []string{"stop"}
 	if opts.Timeout > 0 {
@@ -150,10 +150,10 @@ func (p *Provider) StopInstance(ctx context.Context, handle provider.InstanceHan
 //
 // The tool has no restart verb, so this is the two steps it would run.
 func (p *Provider) RestartInstance(ctx context.Context, handle provider.InstanceHandle) (err error) {
+	defer func() { err = provider.WrapError("container", "restart", handle.ID, err) }()
 	if err := validation.ValidateInstanceName(handle.ID); err != nil {
 		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
 	}
-	defer func() { err = provider.WrapError("container", "restart", handle.ID, err) }()
 
 	if err := p.StopInstance(ctx, handle, provider.StopOptions{}); err != nil {
 		return err
@@ -163,10 +163,10 @@ func (p *Provider) RestartInstance(ctx context.Context, handle provider.Instance
 
 // DeleteInstance removes a container.
 func (p *Provider) DeleteInstance(ctx context.Context, handle provider.InstanceHandle, force bool) (err error) {
+	defer func() { err = provider.WrapError("container", "delete", handle.ID, err) }()
 	if err := validation.ValidateInstanceName(handle.ID); err != nil {
 		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
 	}
-	defer func() { err = provider.WrapError("container", "delete", handle.ID, err) }()
 
 	args := []string{"delete"}
 	if force {

@@ -13,12 +13,12 @@ import (
 
 // DeleteInstance deletes a jail
 func (p *JailProvider) DeleteInstance(ctx context.Context, handle provider.InstanceHandle, force bool) (err error) {
-	if err := validation.ValidateInstanceName(handle.ID); err != nil {
-		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
-	}
 	// Attach provider context so the API layer can tell a failed delete from an
 	// internal fault, and show the caller why it failed.
 	defer func() { err = provider.WrapError("jail", "delete", handle.ID, err) }()
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 
 	ctx, releaseLock, lockErr := p.locks.Acquire(ctx, handle.ID)
 	if lockErr != nil {

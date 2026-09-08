@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/hospitus/hospitus/pkg/provider"
+	"github.com/hospitus/hospitus/pkg/validation"
 )
 
 // FreeBSD services are managed through:
@@ -77,6 +78,9 @@ func validateServiceName(name string) error {
 
 // EnableService enables a service to start at boot
 func (p *JailProvider) EnableService(ctx context.Context, handle provider.InstanceHandle, serviceName string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	if err := validateServiceName(serviceName); err != nil {
 		return err
 	}
@@ -100,6 +104,9 @@ func (p *JailProvider) EnableService(ctx context.Context, handle provider.Instan
 
 // DisableService disables a service from starting at boot
 func (p *JailProvider) DisableService(ctx context.Context, handle provider.InstanceHandle, serviceName string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	if err := validateServiceName(serviceName); err != nil {
 		return err
 	}
@@ -123,6 +130,9 @@ func (p *JailProvider) DisableService(ctx context.Context, handle provider.Insta
 
 // StartService starts a service
 func (p *JailProvider) StartService(ctx context.Context, handle provider.InstanceHandle, serviceName string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	if err := validateServiceName(serviceName); err != nil {
 		return err
 	}
@@ -131,6 +141,9 @@ func (p *JailProvider) StartService(ctx context.Context, handle provider.Instanc
 
 // StopService stops a service
 func (p *JailProvider) StopService(ctx context.Context, handle provider.InstanceHandle, serviceName string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	if err := validateServiceName(serviceName); err != nil {
 		return err
 	}
@@ -139,6 +152,9 @@ func (p *JailProvider) StopService(ctx context.Context, handle provider.Instance
 
 // RestartService restarts a service
 func (p *JailProvider) RestartService(ctx context.Context, handle provider.InstanceHandle, serviceName string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	if err := validateServiceName(serviceName); err != nil {
 		return err
 	}
@@ -147,6 +163,9 @@ func (p *JailProvider) RestartService(ctx context.Context, handle provider.Insta
 
 // ReloadService reloads a service configuration
 func (p *JailProvider) ReloadService(ctx context.Context, handle provider.InstanceHandle, serviceName string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	if err := validateServiceName(serviceName); err != nil {
 		return err
 	}
@@ -173,6 +192,9 @@ func (p *JailProvider) serviceAction(ctx context.Context, handle provider.Instan
 
 // GetServiceStatus returns the status of a service
 func (p *JailProvider) GetServiceStatus(ctx context.Context, handle provider.InstanceHandle, serviceName string) (*ServiceInfo, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	if err := validateServiceName(serviceName); err != nil {
 		return nil, err
 	}
@@ -215,6 +237,9 @@ func (p *JailProvider) GetServiceStatus(ctx context.Context, handle provider.Ins
 
 // ListServices returns a list of available services
 func (p *JailProvider) ListServices(ctx context.Context, handle provider.InstanceHandle) ([]ServiceInfo, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -285,6 +310,9 @@ func (p *JailProvider) listServicesInDir(ctx context.Context, jailName, dir stri
 
 // ListEnabledServices returns only services that are enabled
 func (p *JailProvider) ListEnabledServices(ctx context.Context, handle provider.InstanceHandle) ([]ServiceInfo, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	services, err := p.ListServices(ctx, handle)
 	if err != nil {
 		return nil, err
@@ -302,6 +330,9 @@ func (p *JailProvider) ListEnabledServices(ctx context.Context, handle provider.
 
 // ListRunningServices returns only services that are currently running
 func (p *JailProvider) ListRunningServices(ctx context.Context, handle provider.InstanceHandle) ([]ServiceInfo, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	services, err := p.ListServices(ctx, handle)
 	if err != nil {
 		return nil, err
@@ -320,6 +351,9 @@ func (p *JailProvider) ListRunningServices(ctx context.Context, handle provider.
 // SetServiceConfig sets a service configuration variable
 // Example: SetServiceConfig(ctx, handle, "nginx", "nginx_flags", "-c /etc/nginx/custom.conf")
 func (p *JailProvider) SetServiceConfig(ctx context.Context, handle provider.InstanceHandle, serviceName, variable, value string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	if err := validateServiceName(serviceName); err != nil {
 		return err
 	}
@@ -350,6 +384,9 @@ func (p *JailProvider) SetServiceConfig(ctx context.Context, handle provider.Ins
 
 // GetServiceConfig gets a service configuration variable
 func (p *JailProvider) GetServiceConfig(ctx context.Context, handle provider.InstanceHandle, serviceName, variable string) (string, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return "", fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	if err := validateServiceName(serviceName); err != nil {
 		return "", err
 	}
@@ -389,6 +426,9 @@ func (p *JailProvider) ensureJailRunning(ctx context.Context, handle provider.In
 
 // EnableAndStartService is a convenience function that enables and starts a service
 func (p *JailProvider) EnableAndStartService(ctx context.Context, handle provider.InstanceHandle, serviceName string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	if err := validateServiceName(serviceName); err != nil {
 		return err
 	}
@@ -407,6 +447,9 @@ func isAlreadyStopped(err error) bool {
 
 // StopAndDisableService is a convenience function that stops and disables a service
 func (p *JailProvider) StopAndDisableService(ctx context.Context, handle provider.InstanceHandle, serviceName string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	if err := validateServiceName(serviceName); err != nil {
 		return err
 	}

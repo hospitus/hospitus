@@ -20,6 +20,9 @@ var _ provider.SnapshotProvider = (*JailProvider)(nil)
 //
 // SECURITY: Snapshot name is validated to prevent command injection.
 func (p *JailProvider) CreateSnapshot(ctx context.Context, handle provider.InstanceHandle, name string) (provider.SnapshotHandle, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return provider.SnapshotHandle{}, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	// SECURITY: Validate snapshot name
 	if err := validation.ValidateSnapshotName(name); err != nil {
 		return provider.SnapshotHandle{}, fmt.Errorf("invalid snapshot name: %w", err)
@@ -85,6 +88,9 @@ func (p *JailProvider) DeleteSnapshot(ctx context.Context, snapshot provider.Sna
 //
 // SECURITY: All paths and names are validated.
 func (p *JailProvider) RestoreSnapshot(ctx context.Context, handle provider.InstanceHandle, snapshot provider.SnapshotHandle) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	ctx, releaseLock, lockErr := p.locks.Acquire(ctx, handle.ID)
 	if lockErr != nil {
 		return lockErr
@@ -126,6 +132,9 @@ func (p *JailProvider) RestoreSnapshot(ctx context.Context, handle provider.Inst
 //
 // SECURITY: Parses ZFS output carefully to avoid injection.
 func (p *JailProvider) ListSnapshots(ctx context.Context, handle provider.InstanceHandle) ([]provider.SnapshotInfo, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	dataset, err := p.datasetFor(handle)
 	if err != nil {
 		return nil, err
