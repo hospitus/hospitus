@@ -511,8 +511,9 @@ type AutoStartConfig struct {
 	// Enabled indicates whether auto-start is enabled for this instance
 	Enabled bool `json:"enabled"`
 
-	// Priority determines the start order (lower values start first)
-	// Default: 50, Range: 0-100
+	// Priority determines the start order (lower values start first).
+	// Range: 1-100, default 50. Zero means "not specified" — it is what an
+	// absent JSON field leaves behind, so it cannot also name a priority.
 	Priority int `json:"priority"`
 
 	// DelayMS is the delay in milliseconds before starting this instance
