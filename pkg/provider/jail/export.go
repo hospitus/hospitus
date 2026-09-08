@@ -73,6 +73,9 @@ type ExportManifest struct {
 //   - rootfs/          - Jail root filesystem (tar only)
 //   - zfs.stream       - ZFS stream (ZFS only)
 func (p *JailProvider) ExportInstance(ctx context.Context, handle provider.InstanceHandle, exportPath string, opts provider.ExportOptions) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 	// The name becomes a path under stateDir and a dataset reaching
 	// "zfs snapshot -r", "zfs destroy -r" and "zfs send -R".

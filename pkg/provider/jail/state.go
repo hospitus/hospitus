@@ -18,6 +18,9 @@ import (
 
 // GetInstanceState returns the current state of a jail
 func (p *JailProvider) GetInstanceState(ctx context.Context, handle provider.InstanceHandle) (provider.InstanceState, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return "", fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail configuration exists
@@ -47,6 +50,9 @@ func (p *JailProvider) GetInstanceState(ctx context.Context, handle provider.Ins
 
 // GetInstanceInfo returns detailed information about a jail
 func (p *JailProvider) GetInstanceInfo(ctx context.Context, handle provider.InstanceHandle) (provider.InstanceInfo, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return provider.InstanceInfo{}, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Load configuration
@@ -133,6 +139,9 @@ func (p *JailProvider) ListInstances(ctx context.Context, filter provider.Instan
 
 // SetInstanceResources updates resource limits for a jail
 func (p *JailProvider) SetInstanceResources(ctx context.Context, handle provider.InstanceHandle, resources provider.ResourceSpec) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 	// The name becomes a path under stateDir and, further down, an rctl rule.
 	if err := validation.ValidateInstanceName(jailName); err != nil {
@@ -172,6 +181,9 @@ func (p *JailProvider) SetInstanceResources(ctx context.Context, handle provider
 // GetInstanceMetrics returns resource usage metrics for a jail
 // Uses FreeBSD rctl(8) for resource accounting and netstat for network stats
 func (p *JailProvider) GetInstanceMetrics(ctx context.Context, handle provider.InstanceHandle) (provider.Metrics, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return provider.Metrics{}, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running
@@ -327,6 +339,9 @@ func (p *JailProvider) getInterfaceStats(ctx context.Context, ifname string) (rx
 
 // CheckInstanceHealth performs a health check on a jail instance
 func (p *JailProvider) CheckInstanceHealth(ctx context.Context, handle provider.InstanceHandle) (*provider.InstanceHealth, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 	// The name reaches filepath.Join and a zfs list below.
 	if err := validation.ValidateInstanceName(jailName); err != nil {

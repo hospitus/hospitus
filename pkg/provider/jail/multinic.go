@@ -492,6 +492,9 @@ func (p *JailProvider) startDHCPClient(ctx context.Context, client, jailName, ja
 
 // ListNetworkInterfaces lists all network interfaces in a jail
 func (p *JailProvider) ListNetworkInterfaces(ctx context.Context, handle provider.InstanceHandle) ([]NetworkInterface, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Check if jail is running

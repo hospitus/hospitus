@@ -8,10 +8,14 @@ import (
 
 	"github.com/hospitus/hospitus/pkg/logging"
 	"github.com/hospitus/hospitus/pkg/provider"
+	"github.com/hospitus/hospitus/pkg/validation"
 )
 
 // StopInstance stops a jail
 func (p *JailProvider) StopInstance(ctx context.Context, handle provider.InstanceHandle, opts provider.StopOptions) (err error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	// Attach provider context so the API layer can tell a failed stop from an
 	// internal fault, and show the caller why it failed.
 	defer func() { err = provider.WrapError("jail", "stop", handle.ID, err) }()

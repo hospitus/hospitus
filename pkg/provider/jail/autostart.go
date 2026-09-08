@@ -19,6 +19,9 @@ var _ provider.AutoStartProvider = (*JailProvider)(nil)
 
 // SetAutoStart configures auto-start settings for a jail
 func (p *JailProvider) SetAutoStart(ctx context.Context, handle provider.InstanceHandle, config provider.AutoStartConfig) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Validate priority range
@@ -56,6 +59,9 @@ func (p *JailProvider) SetAutoStart(ctx context.Context, handle provider.Instanc
 
 // GetAutoStart returns the auto-start configuration for a jail
 func (p *JailProvider) GetAutoStart(ctx context.Context, handle provider.InstanceHandle) (*provider.AutoStartConfig, error) {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return nil, fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	jailName := handle.ID
 
 	// Load jail configuration

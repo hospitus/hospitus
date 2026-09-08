@@ -223,6 +223,9 @@ func (p *JailProvider) HealthCheck(ctx context.Context) error {
 
 // AttachDisk attaches a disk to a jail (mounts a ZFS dataset or directory)
 func (p *JailProvider) AttachDisk(ctx context.Context, handle provider.InstanceHandle, disk provider.DiskAttachment) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	configPath := filepath.Join(p.stateDir, fmt.Sprintf("%s.json", handle.ID))
 	jailConfig, err := p.loadJailConfig(configPath)
 	if err != nil {
@@ -274,6 +277,9 @@ func (p *JailProvider) AttachDisk(ctx context.Context, handle provider.InstanceH
 
 // DetachDisk detaches a disk from a jail
 func (p *JailProvider) DetachDisk(ctx context.Context, handle provider.InstanceHandle, diskID string) error {
+	if err := validation.ValidateInstanceName(handle.ID); err != nil {
+		return fmt.Errorf("invalid instance id %q: %w", handle.ID, err)
+	}
 	configPath := filepath.Join(p.stateDir, fmt.Sprintf("%s.json", handle.ID))
 	jailConfig, err := p.loadJailConfig(configPath)
 	if err != nil {

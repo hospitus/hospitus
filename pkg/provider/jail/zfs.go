@@ -108,8 +108,11 @@ func (p *JailProvider) ensureOwnDatasetOrSnapshot(name string) error {
 	if !found {
 		return p.ensureOwnDataset(name)
 	}
-	if snap == "" || strings.ContainsAny(snap, "@/ \t\n") || strings.HasPrefix(snap, "-") {
-		return fmt.Errorf("refusing snapshot %q: invalid snapshot name", name)
+	// zfs(8) reads "%" as a range separator, and either side may be left blank:
+	// "vol@%" names every snapshot the volume has. Validated as a plain name
+	// rather than by listing forbidden characters.
+	if err := validation.ValidateSnapshotName(snap); err != nil {
+		return fmt.Errorf("refusing snapshot %q: %w", name, err)
 	}
 	return p.ensureOwnDataset(ds)
 }
