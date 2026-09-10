@@ -15,6 +15,7 @@ import (
 
 	"github.com/hospitus/hospitus/pkg/dataset"
 	"github.com/hospitus/hospitus/pkg/logging"
+	"github.com/hospitus/hospitus/pkg/provider"
 	"github.com/hospitus/hospitus/pkg/storage"
 	"github.com/hospitus/hospitus/pkg/validation"
 )
@@ -34,59 +35,12 @@ import (
 //
 // Volumes are mounted into jails using nullfs mounts.
 
-// Volume represents a named storage volume
-type Volume struct {
-	// Name is the volume name (unique identifier)
-	Name string `json:"name"`
+// Volume and VolumeMountInfo are aliases: the types moved to pkg/provider so
+// the API can reach volume mounting through the NamedVolumeProvider interface
+// instead of the concrete *JailProvider.
+type Volume = provider.NamedVolume
 
-	// Description is a human-readable description
-	Description string `json:"description,omitempty"`
-
-	// ZFSDataset is the full ZFS dataset path
-	ZFSDataset string `json:"zfs_dataset"`
-
-	// Mountpoint is the filesystem path where the volume is mounted
-	Mountpoint string `json:"mountpoint"`
-
-	// Quota is the storage quota in bytes (0 = unlimited)
-	Quota int64 `json:"quota,omitempty"`
-
-	// Reservation is the guaranteed storage in bytes (0 = none)
-	Reservation int64 `json:"reservation,omitempty"`
-
-	// Compression is the ZFS compression algorithm (lz4, zstd, gzip, off)
-	Compression string `json:"compression,omitempty"`
-
-	// ReadOnly makes the volume read-only when mounted
-	ReadOnly bool `json:"read_only,omitempty"`
-
-	// Created is the creation timestamp
-	Created time.Time `json:"created"`
-
-	// UsedBytes is the current usage in bytes
-	UsedBytes int64 `json:"used_bytes,omitempty"`
-
-	// AvailableBytes is the available space in bytes
-	AvailableBytes int64 `json:"available_bytes,omitempty"`
-
-	// MountedTo lists jails this volume is mounted to
-	MountedTo []VolumeMountInfo `json:"mounted_to,omitempty"`
-
-	// Labels are key-value pairs for organization
-	Labels map[string]string `json:"labels,omitempty"`
-}
-
-// VolumeMountInfo represents a volume mount in a jail
-type VolumeMountInfo struct {
-	// JailName is the name of the jail
-	JailName string `json:"jail_name"`
-
-	// MountPath is the path inside the jail
-	MountPath string `json:"mount_path"`
-
-	// ReadOnly indicates if mounted read-only
-	ReadOnly bool `json:"read_only"`
-}
+type VolumeMountInfo = provider.VolumeMountInfo
 
 // VolumeMount represents a volume mount specification
 type VolumeMount struct {
@@ -834,3 +788,8 @@ func (p *JailProvider) CloneVolume(ctx context.Context, volumeName, snapshotName
 
 	return p.GetVolume(ctx, newVolumeName)
 }
+
+// The API reaches named volumes through this interface, not through
+// *JailProvider. Asserted here so a signature change breaks the build rather
+// than turning a live endpoint into 501.
+var _ provider.NamedVolumeProvider = (*JailProvider)(nil)

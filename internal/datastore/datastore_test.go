@@ -578,7 +578,12 @@ func TestRenameInstance(t *testing.T) {
 		t.Fatalf("CreateInstance: %v", err)
 	}
 
-	if err := ds.RenameInstance(ctx, "rename-old", "rename-new"); err != nil {
+	renamed := provider.InstanceHandle{
+		ID:       "rename-new",
+		Provider: "jail",
+		Metadata: map[string]interface{}{"zfs_dataset": "tank/jails/rename-new"},
+	}
+	if err := ds.RenameInstance(ctx, "rename-old", "rename-new", renamed); err != nil {
 		t.Fatalf("RenameInstance: %v", err)
 	}
 
@@ -595,10 +600,18 @@ func TestRenameInstance(t *testing.T) {
 		t.Fatalf("GetInstanceByName(new): %v", err)
 	}
 	if newInst == nil {
-		t.Error("new name should exist after rename")
+		t.Fatal("new name should exist after rename")
 	}
 
-	if err := ds.RenameInstance(ctx, "ghost", "whatever"); err == nil {
+	// The handle moves with the id and the name, in the same transaction.
+	if newInst.Handle.ID != "rename-new" {
+		t.Errorf("handle id = %q, want rename-new", newInst.Handle.ID)
+	}
+	if got := newInst.Handle.Metadata["zfs_dataset"]; got != "tank/jails/rename-new" {
+		t.Errorf("handle zfs_dataset = %v, want tank/jails/rename-new", got)
+	}
+
+	if err := ds.RenameInstance(ctx, "ghost", "whatever", renamed); err == nil {
 		t.Error("expected error for nonexistent instance")
 	}
 }
