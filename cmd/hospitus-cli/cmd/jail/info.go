@@ -29,9 +29,13 @@ Examples:
 }
 
 func runInfo(cmd *cobra.Command, args []string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	name := args[0]
-	outputFmt, _ := cmd.Flags().GetString(cmdutil.FlagOutput)
 
 	instance, err := cmdutil.APIClient.GetInstance(ctx, name)
 	if err != nil {
@@ -41,13 +45,6 @@ func runInfo(cmd *cobra.Command, args []string) error {
 	// Verify it's a jail
 	if instance.Provider != "jail" {
 		return fmt.Errorf("%s is not a jail (provider: %s)", name, instance.Provider)
-	}
-
-	var format cmdutil.OutputFormat
-	if outputFmt == "json" {
-		format = cmdutil.OutputFormatJSON
-	} else {
-		format = cmdutil.OutputFormatTable
 	}
 
 	return cmdutil.PrintInstance(cmd.OutOrStdout(), instance, format)

@@ -186,6 +186,11 @@ func runExposeRemove(cmd *cobra.Command, args []string, hostPort int, protocol s
 }
 
 func runExposeList(cmd *cobra.Command, args []string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	jailName := args[0]
 	if err := cmdutil.RequireInstanceOf(ctx, cmdutil.APIClient, jailName, "jail"); err != nil {
@@ -198,7 +203,7 @@ func runExposeList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to list port forwarding rules: %w", err)
 	}
 
-	if outputFormat, _ := cmd.Flags().GetString(cmdutil.FlagOutput); outputFormat == "json" {
+	if format == cmdutil.OutputFormatJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(mappings)

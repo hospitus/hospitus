@@ -1,6 +1,7 @@
 package jail
 
 import (
+	"encoding/json"
 	"fmt"
 	"text/tabwriter"
 
@@ -234,9 +235,26 @@ func formatQuota(bytes int64) string {
 func runVolumeList(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	volumes, err := cmdutil.APIClient.ListVolumes(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list volumes: %w", err)
+	}
+
+	// The command registered --output and never read it, so "--output json"
+	// printed the table. The empty case goes through the encoder too: a
+	// caller parsing the output wants [], not a sentence.
+	if format == cmdutil.OutputFormatJSON {
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetIndent("", "  ")
+		if volumes == nil {
+			volumes = []client.VolumeInfo{}
+		}
+		return enc.Encode(volumes)
 	}
 
 	if len(volumes) == 0 {

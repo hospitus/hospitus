@@ -1,8 +1,10 @@
 package podman
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -88,19 +90,23 @@ Examples:
 }
 
 func runPodmanSnapshotList(cmd *cobra.Command, args []string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	containerName := args[0]
 	if err := cmdutil.RequireInstanceOf(ctx, cmdutil.APIClient, containerName, providerName); err != nil {
 		return err
 	}
-	outputFmt, _ := cmd.Flags().GetString(cmdutil.FlagOutput)
 
 	snapshots, err := cmdutil.APIClient.ListSnapshots(ctx, containerName)
 	if err != nil {
 		return fmt.Errorf("failed to list snapshots: %w", err)
 	}
 
-	if outputFmt == "json" {
+	if format == cmdutil.OutputFormatJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(snapshots)
@@ -146,8 +152,12 @@ func runPodmanSnapshotDelete(cmd *cobra.Command, args []string) error {
 
 	if !yes {
 		fmt.Fprintf(cmd.OutOrStdout(), "Delete snapshot %s@%s? [y/N] ", containerName, snapshotName)
-		var confirm string
-		fmt.Scanln(&confirm) //nolint:errcheck
+		// Through the command's own stream, as the destroy commands do:
+		// fmt.Scanln reads os.Stdin whatever the caller redirected, which
+		// also put this branch out of reach of a test.
+		reader := bufio.NewReader(cmd.InOrStdin())
+		line, _ := reader.ReadString('\n')
+		confirm := strings.TrimSpace(line)
 		if confirm != "y" && confirm != "Y" {
 			fmt.Fprintln(cmd.OutOrStdout(), "Canceled.")
 			return nil
@@ -191,8 +201,12 @@ func runPodmanSnapshotRestore(cmd *cobra.Command, args []string) error {
 
 	if !yes {
 		fmt.Fprintf(cmd.OutOrStdout(), "Restore %s to snapshot %s? [y/N] ", containerName, snapshotName)
-		var confirm string
-		fmt.Scanln(&confirm) //nolint:errcheck
+		// Through the command's own stream, as the destroy commands do:
+		// fmt.Scanln reads os.Stdin whatever the caller redirected, which
+		// also put this branch out of reach of a test.
+		reader := bufio.NewReader(cmd.InOrStdin())
+		line, _ := reader.ReadString('\n')
+		confirm := strings.TrimSpace(line)
 		if confirm != "y" && confirm != "Y" {
 			fmt.Fprintln(cmd.OutOrStdout(), "Canceled.")
 			return nil

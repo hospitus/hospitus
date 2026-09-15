@@ -31,19 +31,23 @@ Examples:
 }
 
 func runPodmanStats(cmd *cobra.Command, args []string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	name := args[0]
 	if err := cmdutil.RequireInstanceOf(ctx, cmdutil.APIClient, name, providerName); err != nil {
 		return err
 	}
-	outputFmt, _ := cmd.Flags().GetString(cmdutil.FlagOutput)
 
 	metrics, err := cmdutil.APIClient.GetInstanceMetrics(ctx, name)
 	if err != nil {
 		return fmt.Errorf("failed to get container stats: %w", err)
 	}
 
-	if outputFmt == "json" {
+	if format == cmdutil.OutputFormatJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(metrics)

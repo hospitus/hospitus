@@ -32,12 +32,16 @@ Examples:
 }
 
 func runStats(cmd *cobra.Command, args []string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	name := args[0]
 	if err := cmdutil.RequireInstanceOf(ctx, cmdutil.APIClient, name, "jail"); err != nil {
 		return err
 	}
-	outputFmt, _ := cmd.Flags().GetString(cmdutil.FlagOutput)
 
 	// Get metrics from API
 	metrics, err := cmdutil.APIClient.GetInstanceMetrics(ctx, name)
@@ -45,7 +49,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get jail stats: %w", err)
 	}
 
-	if outputFmt == "json" {
+	if format == cmdutil.OutputFormatJSON {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(metrics)

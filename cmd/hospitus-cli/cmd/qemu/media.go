@@ -92,12 +92,17 @@ func runMediaInsert(cmd *cobra.Command, args []string) error {
 	mediaReadOnly, _ := cmd.Flags().GetBool("readonly")
 	mediaBootable, _ := cmd.Flags().GetBool("bootable")
 
-	// Validate path exists
+	// Only when the daemon shares this host: the file is opened on the
+	// daemon's machine, so statting it here refused a path that exists
+	// perfectly well where it will actually be read.
+	//
 	// Any stat failure, not only "not found": a permission error or a broken
 	// symlink was ignored here and surfaced later as an opaque provider
 	// failure.
-	if _, err := os.Stat(mediaPath); err != nil {
-		return fmt.Errorf("cannot read media file %s: %w", mediaPath, err)
+	if cmdutil.DaemonIsLocal() {
+		if _, err := os.Stat(mediaPath); err != nil {
+			return fmt.Errorf("cannot read media file %s: %w", mediaPath, err)
+		}
 	}
 
 	spec := provider.MediaSpec{
@@ -186,12 +191,16 @@ Examples:
 }
 
 func runMediaList(cmd *cobra.Command, args []string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	instanceName := args[0]
 	if err := cmdutil.RequireInstanceOf(ctx, cmdutil.APIClient, instanceName, "qemu"); err != nil {
 		return err
 	}
-	outputFmt, _ := cmd.Flags().GetString(cmdutil.FlagOutput)
 
 	media, err := cmdutil.APIClient.ListMedia(ctx, instanceName)
 	if err != nil {
@@ -203,7 +212,7 @@ func runMediaList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if outputFmt == "json" {
+	if format == cmdutil.OutputFormatJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(media)

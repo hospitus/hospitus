@@ -233,6 +233,11 @@ func runNetworkRemove(cmd *cobra.Command, jailName, interfaceName string) error 
 }
 
 func runNetworkList(cmd *cobra.Command, jailName string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	if err := cmdutil.RequireInstanceOf(ctx, cmdutil.APIClient, jailName, "jail"); err != nil {
 		return err
@@ -246,7 +251,7 @@ func runNetworkList(cmd *cobra.Command, jailName string) error {
 	// The command declares --output; honor it. It was declared and never
 	// read, so "hospitus jail network list web --output json" printed the table
 	// and anything parsing the result got a header row.
-	if outputFmt, _ := cmd.Flags().GetString(cmdutil.FlagOutput); outputFmt == "json" {
+	if format == cmdutil.OutputFormatJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(interfaces)

@@ -51,6 +51,18 @@ func runConsole(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("container is not running (state: %s)", instance.State)
 	}
 
+	// This runs the podman on *this* machine. Against a daemon elsewhere it
+	// would act on a container of the same name here, or report none at all,
+	// while appearing to address the remote one.
+	//
+	// The locality test reads the configured URL, so a loopback address that
+	// is really a tunnel still passes; it catches the ordinary mistake of
+	// pointing --url at another host, not a deliberate tunnel.
+	if !cmdutil.DaemonIsLocal() {
+		return fmt.Errorf("this command runs podman on this machine, and the daemon is not local\n" +
+			"  → run it on the daemon's host, or use 'hospitus podman exec', which goes through the API")
+	}
+
 	// Use the instance name as container name
 	containerName := instance.Name
 

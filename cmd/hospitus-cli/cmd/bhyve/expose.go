@@ -190,6 +190,11 @@ func runBhyveExposeRemove(cmd *cobra.Command, args []string, hostPort int, proto
 }
 
 func runBhyveExposeList(cmd *cobra.Command, args []string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	vmName := args[0]
 	api := cmdutil.APIClient
@@ -205,7 +210,7 @@ func runBhyveExposeList(cmd *cobra.Command, args []string) error {
 	// The flag AddOutputFlag registers on this command, which nothing read:
 	// "--output json" printed the same table as always, so a script parsing
 	// it got a header and columns.
-	if outputFmt, _ := cmd.Flags().GetString(cmdutil.FlagOutput); outputFmt == "json" {
+	if format == cmdutil.OutputFormatJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(ports)

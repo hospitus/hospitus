@@ -108,8 +108,7 @@ Examples:
   hospitus jail snapshot list --pattern "web*"      # List snapshots for jails matching "web*"`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			outputFormat, _ := cmd.Flags().GetString(cmdutil.FlagOutput)
-			return runSnapshotList(cmd, args, outputFormat, all, pattern)
+			return runSnapshotList(cmd, args, all, pattern)
 		},
 	}
 
@@ -128,8 +127,15 @@ type snapshotWithInstance struct {
 	client.SnapshotInfo
 }
 
-func runSnapshotList(cmd *cobra.Command, args []string, outputFormat string, all bool, pattern string) error {
+func runSnapshotList(cmd *cobra.Command, args []string, all bool, pattern string) error {
 	ctx := cmd.Context()
+
+	// Before any listing: an unusable --output should not cost a round-trip to
+	// the daemon, nor be reported only after "No snapshots found" has printed.
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
 
 	// A positional jail name cannot be combined with -a/--all or -x/--pattern:
 	// reject the combination rather than silently ignoring the argument.
@@ -242,7 +248,7 @@ func runSnapshotList(cmd *cobra.Command, args []string, outputFormat string, all
 		return nil
 	}
 
-	if outputFormat == "json" {
+	if format == cmdutil.OutputFormatJSON {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(allSnapshots)

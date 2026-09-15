@@ -86,19 +86,23 @@ Examples:
 }
 
 func runQEMUSnapshotList(cmd *cobra.Command, args []string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	vmName := args[0]
 	if err := cmdutil.RequireInstanceOf(ctx, cmdutil.APIClient, vmName, "qemu"); err != nil {
 		return err
 	}
-	outputFmt, _ := cmd.Flags().GetString(cmdutil.FlagOutput)
 
 	snapshots, err := cmdutil.APIClient.ListSnapshots(ctx, vmName)
 	if err != nil {
 		return fmt.Errorf("failed to list snapshots: %w", err)
 	}
 
-	if outputFmt == "json" {
+	if format == cmdutil.OutputFormatJSON {
 		// A nil slice encodes as "null", which a caller parsing the output has
 		// to special-case; an empty list is what "no snapshots" means.
 		if snapshots == nil {

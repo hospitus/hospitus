@@ -35,12 +35,16 @@ Examples:
 }
 
 func runHealth(cmd *cobra.Command, args []string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	name := args[0]
 	if err := cmdutil.RequireInstanceOf(ctx, cmdutil.APIClient, name, "jail"); err != nil {
 		return err
 	}
-	outputFmt, _ := cmd.Flags().GetString(cmdutil.FlagOutput)
 
 	// Get health from API
 	health, err := cmdutil.APIClient.GetInstanceHealth(ctx, name)
@@ -48,7 +52,7 @@ func runHealth(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get jail health: %w", err)
 	}
 
-	if outputFmt == "json" {
+	if format == cmdutil.OutputFormatJSON {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(health)

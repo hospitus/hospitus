@@ -30,8 +30,12 @@ Examples:
 }
 
 func runList(cmd *cobra.Command, args []string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
-	outputFmt, _ := cmd.Flags().GetString(cmdutil.FlagOutput)
 
 	filter := client.ListInstancesFilter{Provider: "jail"}
 	instances, err := cmdutil.APIClient.ListInstances(ctx, filter)
@@ -49,13 +53,6 @@ func runList(cmd *cobra.Command, args []string) error {
 	var jails []datastore.Instance
 	for _, inst := range instances {
 		jails = append(jails, *inst)
-	}
-
-	var format cmdutil.OutputFormat
-	if outputFmt == "json" {
-		format = cmdutil.OutputFormatJSON
-	} else {
-		format = cmdutil.OutputFormatTable
 	}
 
 	return cmdutil.PrintInstanceList(cmd.OutOrStdout(), jails, format)

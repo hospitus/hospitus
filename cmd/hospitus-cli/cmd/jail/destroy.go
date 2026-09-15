@@ -78,12 +78,25 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 
 	switch {
 	case pattern != "":
+		// Validated before the listing, not inside the loop: with nothing to
+		// iterate a malformed pattern was never examined, so "--pattern [" on
+		// a host with no instances reported "no match" and exited 0 rather
+		// than naming the typo.
+		if _, err := filepath.Match(pattern, ""); err != nil {
+			return fmt.Errorf("invalid pattern '%s': %w", pattern, err)
+		}
+
 		// List all jails and filter by pattern
 		instances, err := cmdutil.APIClient.ListInstances(ctx, client.ListInstancesFilter{
 			Provider: "jail",
 		})
 		if err != nil {
 			return fmt.Errorf("failed to list jails: %w", err)
+		}
+		// A null element decodes to a nil pointer, and reading inst.Name
+		// below panics the command.
+		if err := cmdutil.CheckInstanceList(instances); err != nil {
+			return err
 		}
 
 		for _, inst := range instances {
@@ -112,11 +125,20 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	case len(args) > 0:
 		// Resolve each name by exact match only: destroy must never act on a
 		// jail whose name merely resembles the one asked for.
+		// Two arguments can name one instance — a name and its id, or the
+		// same name twice — and each was destroyed once per mention: the
+		// second call failed with "not found" and the command reported an
+		// error for work it had just completed.
+		seen := make(map[string]bool, len(args))
 		for _, arg := range args {
 			resolved, err := cmdutil.ResolveInstanceNameStrict(ctx, cmdutil.APIClient, arg, "jail")
 			if err != nil {
 				return fmt.Errorf("cannot resolve jail %q: %w", arg, err)
 			}
+			if seen[resolved] {
+				continue
+			}
+			seen[resolved] = true
 			jailsToDestroy = append(jailsToDestroy, resolved)
 		}
 	default:

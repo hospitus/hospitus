@@ -34,12 +34,16 @@ Examples:
 }
 
 func runPodmanHealth(cmd *cobra.Command, args []string) error {
+	format, err := cmdutil.OutputFormatFrom(cmd)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	name := args[0]
 	if err := cmdutil.RequireInstanceOf(ctx, cmdutil.APIClient, name, providerName); err != nil {
 		return err
 	}
-	outputFmt, _ := cmd.Flags().GetString(cmdutil.FlagOutput)
 
 	health, err := cmdutil.APIClient.GetInstanceHealth(ctx, name)
 	if err != nil {
@@ -51,7 +55,7 @@ func runPodmanHealth(cmd *cobra.Command, args []string) error {
 	// exactly what a script parses.
 	unhealthy := strings.EqualFold(health.Status, "unhealthy")
 
-	if outputFmt == "json" {
+	if format == cmdutil.OutputFormatJSON {
 		encoder := json.NewEncoder(cmd.OutOrStdout())
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(health); err != nil {
